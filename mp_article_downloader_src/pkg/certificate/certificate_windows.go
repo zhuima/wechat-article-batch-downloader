@@ -3,111 +3,128 @@
 package certificate
 
 import (
+	"crypto/sha1"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
+	"syscall"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 func fetchCertificates() ([]Certificate, error) {
-	// PowerShell 2.0 compatible command
-	cmd := "Get-ChildItem Cert:\\LocalMachine\\Root | ForEach-Object { $_.Thumbprint + \"###\" + $_.Subject }"
-	ps := exec.Command("powershell.exe", "-NoProfile", "-Command", cmd)
-	output, err2 := ps.CombinedOutput()
-	if err2 != nil {
-		return nil, fmt.Errorf("获取证书时发生错误，%v\n", err2.Error())
+	store, err := openCurrentUserRoot()
+	if err != nil {
+		return nil, err
 	}
-
+	defer windows.CertCloseStore(store, 0)
 	var certificates []Certificate
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	var previous *windows.CertContext
+	for {
+		context, err := windows.CertEnumCertificatesInStore(store, previous)
+		if err != nil {
+			if errors.Is(err, syscall.Errno(0x80092004)) { // CRYPT_E_NOT_FOUND
+				break
+			}
+			return nil, fmt.Errorf("枚举根证书失败: %w", err)
+		}
+		if context == nil {
+			break
+		}
+		previous = context // CertEnumCertificatesInStore frees the previous context.
+		if context.EncodedCert == nil {
 			continue
 		}
-		parts := strings.SplitN(line, "###", 2)
-		if len(parts) < 2 {
+		parsed, err := x509.ParseCertificate(unsafe.Slice(context.EncodedCert, int(context.Length)))
+		if err != nil {
 			continue
 		}
-		thumbprint := parts[0]
-		subject_str := parts[1]
-
-		subj := CertificateSubject{}
-		pairs := strings.Split(subject_str, ",")
-		for _, p := range pairs {
-			kv := strings.SplitN(strings.TrimSpace(p), "=", 2)
-			if len(kv) != 2 {
-				continue
-			}
-			key := kv[0]
-			value := kv[1]
-			switch key {
-			case "CN":
-				subj.CN = value
-			case "OU":
-				subj.OU = value
-			case "O":
-				subj.O = value
-			case "L":
-				subj.L = value
-			case "S":
-				subj.S = value
-			case "C":
-				subj.C = value
-			}
-		}
+		fingerprint := sha1.Sum(parsed.Raw)
 		certificates = append(certificates, Certificate{
-			Thumbprint: thumbprint,
-			Subject:    subj,
+			Thumbprint: strings.ToUpper(hex.EncodeToString(fingerprint[:])),
+			Subject: CertificateSubject{
+				CN: parsed.Subject.CommonName,
+				O:  firstSubjectValue(parsed.Subject.Organization),
+				OU: firstSubjectValue(parsed.Subject.OrganizationalUnit),
+				L:  firstSubjectValue(parsed.Subject.Locality),
+				S:  firstSubjectValue(parsed.Subject.Province),
+				C:  firstSubjectValue(parsed.Subject.Country),
+			},
 		})
 	}
 	return certificates, nil
 }
 
-func installCertificate(cert_data []byte) error {
-	cert_file, err := os.CreateTemp("", "SunnyRoot.cer")
+func openCurrentUserRoot() (windows.Handle, error) {
+	name, err := windows.UTF16PtrFromString("Root")
 	if err != nil {
-		return fmt.Errorf("没有创建证书的权限，%v\n", err.Error())
+		return 0, err
 	}
-	defer os.Remove(cert_file.Name())
-	if _, err := cert_file.Write(cert_data); err != nil {
-		return fmt.Errorf("获取证书失败，%v\n", err.Error())
+	store, err := windows.CertOpenStore(uintptr(windows.CERT_STORE_PROV_SYSTEM_REGISTRY), 0, 0,
+		windows.CERT_SYSTEM_STORE_CURRENT_USER, uintptr(unsafe.Pointer(name)))
+	if err != nil {
+		return 0, fmt.Errorf("打开当前用户的根证书列表失败: %w", err)
 	}
-	if err := cert_file.Close(); err != nil {
-		return fmt.Errorf("生成证书失败，%v\n", err.Error())
+	return store, nil
+}
+
+func firstSubjectValue(values []string) string {
+	if len(values) == 0 {
+		return ""
 	}
-	// Use certutil for Windows 7 compatibility
-	cmd := exec.Command("certutil", "-addstore", "Root", cert_file.Name())
-	output, err2 := cmd.CombinedOutput()
-	if err2 != nil {
-		return fmt.Errorf("安装证书时发生错误，%v\n", string(output))
+	return values[0]
+}
+
+func installCertificate(cert_data []byte) error {
+	block, _ := pem.Decode(cert_data)
+	if block == nil || block.Type != "CERTIFICATE" || len(block.Bytes) == 0 {
+		return errors.New("证书格式无效")
+	}
+	store, err := openCurrentUserRoot()
+	if err != nil {
+		return err
+	}
+	defer windows.CertCloseStore(store, 0)
+	context, err := windows.CertCreateCertificateContext(windows.X509_ASN_ENCODING, &block.Bytes[0], uint32(len(block.Bytes)))
+	if err != nil {
+		return fmt.Errorf("读取证书失败: %w", err)
+	}
+	defer windows.CertFreeCertificateContext(context)
+	if err := windows.CertAddCertificateContextToStore(store, context, windows.CERT_STORE_ADD_REPLACE_EXISTING, nil); err != nil {
+		return fmt.Errorf("将证书加入当前用户的信任列表失败: %w", err)
 	}
 	return nil
 }
 
 func uninstallCertificate(name string) error {
-	fmt.Println(name)
-	// Remove-Item "Cert:\LocalMachine\Root\D70CD039051F77C30673B8209FC15EFA650ED52C"
-	certificates, err := fetchCertificates()
+	store, err := openCurrentUserRoot()
 	if err != nil {
 		return err
 	}
-	var matched *Certificate
-	for _, cert := range certificates {
-		if cert.Subject.CN == name {
-			matched = &cert
-			break
+	defer windows.CertCloseStore(store, 0)
+	var previous *windows.CertContext
+	for {
+		context, err := windows.CertEnumCertificatesInStore(store, previous)
+		if err != nil {
+			if errors.Is(err, syscall.Errno(0x80092004)) {
+				return errors.New("没有找到要删除的证书")
+			}
+			return fmt.Errorf("枚举根证书失败: %w", err)
+		}
+		if context == nil {
+			return errors.New("没有找到要删除的证书")
+		}
+		previous = context
+		if context.EncodedCert == nil {
+			continue
+		}
+		parsed, err := x509.ParseCertificate(unsafe.Slice(context.EncodedCert, int(context.Length)))
+		if err == nil && parsed.Subject.CommonName == name {
+			return windows.CertDeleteCertificateFromStore(context)
 		}
 	}
-	if matched == nil {
-		return errors.New("没有找到要删除的证书")
-	}
-	cmd := fmt.Sprintf("Get-ChildItem Cert:\\LocalMachine\\Root\\%v | Remove-Item", matched.Thumbprint)
-	ps := exec.Command("powershell.exe", "-NoProfile", "-Command", cmd)
-	output, err2 := ps.CombinedOutput()
-	if err2 != nil {
-		return fmt.Errorf("删除证书时发生错误，%v\n", string(output))
-	}
-	return nil
 }

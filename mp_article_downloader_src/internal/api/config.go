@@ -13,6 +13,7 @@ import (
 )
 
 type APIConfig struct {
+	Shutdown                     func()
 	Version                      string
 	Mode                         string
 	Original                     *config.Config

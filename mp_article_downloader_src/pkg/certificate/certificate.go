@@ -3,14 +3,17 @@ package certificate
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha1"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -127,6 +130,27 @@ func CheckHasCertificate(cert_name string) (bool, error) {
 	}
 	for _, cert := range certificates {
 		if cert.Subject.CN == cert_name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// CheckInstalled matches the actual generated certificate, not just its name.
+// An old installation may have a different private key with the same subject.
+func CheckInstalled(certData []byte) (bool, error) {
+	block, _ := pem.Decode(certData)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return false, errors.New("invalid certificate PEM")
+	}
+	fingerprint := sha1.Sum(block.Bytes)
+	want := strings.ToUpper(hex.EncodeToString(fingerprint[:]))
+	installed, err := fetchCertificates()
+	if err != nil {
+		return false, err
+	}
+	for _, cert := range installed {
+		if strings.EqualFold(strings.ReplaceAll(cert.Thumbprint, " ", ""), want) {
 			return true, nil
 		}
 	}

@@ -1,24 +1,28 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
 
-set OUTPUT_DIR=%~dp0
-if "%OUTPUT_DIR%" neq "" set OUTPUT_DIR=%OUTPUT_DIR:~0,-1%
+set "OUTPUT_DIR=%~dp0"
+set "BINARY=%OUTPUT_DIR%mp_article_batch_downloader.exe"
+set "TEMP_BINARY=%OUTPUT_DIR%mp_article_batch_downloader_windows_x86_64.exe"
 
-if "%1" equ "" goto usage
-
-goto %1
+if /I "%~1"=="windows" goto windows
+if /I "%~1"=="windows-sunnynet" goto windows-sunnynet
+if /I "%~1"=="all" goto all
+goto usage
 
 :windows
 echo Building Windows x86_64...
-set CGO_ENABLED=0
-set GOOS=windows
-set GOARCH=amd64
-go build -trimpath -ldflags="-s -w" -o "%OUTPUT_DIR%\mp_article_batch_downloader_windows_x86_64.exe"
-if exist mp_article_batch_downloader.exe (
-    del mp_article_batch_downloader.exe
-)
-move /Y mp_article_batch_downloader_windows_x86_64.exe mp_article_batch_downloader.exe >nul 2>&1
-echo Done: %OUTPUT_DIR%\mp_article_batch_downloader.exe
+set "CGO_ENABLED=0"
+set "GOOS=windows"
+set "GOARCH=amd64"
+pushd "%~dp0.." || exit /b 1
+go build -trimpath -ldflags="-s -w" -o "%TEMP_BINARY%" .
+set "BUILD_RESULT=%ERRORLEVEL%"
+popd
+if not "%BUILD_RESULT%"=="0" exit /b %BUILD_RESULT%
+move /Y "%TEMP_BINARY%" "%BINARY%" >nul
+if errorlevel 1 exit /b 1
+echo Done: %BINARY%
 exit /b 0
 
 :windows-sunnynet
@@ -38,6 +42,7 @@ exit /b 1
 :all
 echo Building Windows...
 call :windows
+if errorlevel 1 exit /b 1
 echo.
 echo All done!
 exit /b 0

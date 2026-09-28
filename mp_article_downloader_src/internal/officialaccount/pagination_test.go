@@ -1,6 +1,7 @@
 package officialaccount
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -64,11 +65,56 @@ func TestCollectArticleHistoryUsesLastMidCursor(t *testing.T) {
 }
 
 func TestCollectArticleHistoryRejectsStalledCursor(t *testing.T) {
-	_, err := collectArticleHistory(func(string) (*ArticleListResponse, error) {
+	history, err := collectArticleHistory(func(string) (*ArticleListResponse, error) {
 		return &ArticleListResponse{Articles: []Article{{Mid: "same"}}}, nil
 	}, 2)
 	if err == nil {
 		t.Fatal("accepted stalled cursor")
+	}
+	if history == nil || history.Pages != 2 || len(history.Articles) != 1 || history.Articles[0].Mid != "same" {
+		t.Fatalf("previously discovered article was lost: %+v", history)
+	}
+}
+
+func TestCollectArticleHistoryPreservesCompletedPagesOnFetchFailure(t *testing.T) {
+	fetchErr := errors.New("temporary page failure")
+	history, err := collectArticleHistory(func(cursor string) (*ArticleListResponse, error) {
+		if cursor == "" {
+			return &ArticleListResponse{Articles: []Article{{Mid: "newest"}, {Mid: "older"}}}, nil
+		}
+		if cursor != "older" {
+			t.Fatalf("unexpected cursor %q", cursor)
+		}
+		return nil, fetchErr
+	}, 10)
+	if !errors.Is(err, fetchErr) {
+		t.Fatalf("fetch error = %v", err)
+	}
+	if history == nil || history.Pages != 1 || len(history.Articles) != 2 || history.Articles[1].Mid != "older" {
+		t.Fatalf("completed page was lost: %+v", history)
+	}
+}
+
+func TestCollectArticleHistoryHasNoPartialResultBeforeFirstPage(t *testing.T) {
+	fetchErr := errors.New("first page failed")
+	history, err := collectArticleHistory(func(string) (*ArticleListResponse, error) {
+		return nil, fetchErr
+	}, 10)
+	if !errors.Is(err, fetchErr) || history != nil {
+		t.Fatalf("first-page failure: history=%+v err=%v", history, err)
+	}
+}
+
+func TestCollectArticleHistoryPreservesResultsAtSafetyLimit(t *testing.T) {
+	history, err := collectArticleHistory(func(cursor string) (*ArticleListResponse, error) {
+		if cursor == "" {
+			return &ArticleListResponse{Articles: []Article{{Mid: "first"}}}, nil
+		}
+		t.Fatalf("unexpected cursor %q", cursor)
+		return nil, nil
+	}, 1)
+	if !errors.Is(err, ErrHistoryInvalidResponse) || history == nil || history.Pages != 1 || len(history.Articles) != 1 {
+		t.Fatalf("safety-limit result: history=%+v err=%v", history, err)
 	}
 }
 

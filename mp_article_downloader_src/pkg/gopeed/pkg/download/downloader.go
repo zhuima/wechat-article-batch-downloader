@@ -296,12 +296,23 @@ func (d *Downloader) notifyRunning() {
 		if remainRunningCount == 0 {
 			return
 		}
-		if len(d.waitTasks) > 0 {
-			wt := d.waitTasks[0]
-			d.waitTasks = d.waitTasks[1:]
+		if wt := d.nextWaitTask(); wt != nil {
 			d.doStart(wt)
 		}
 	}()
+}
+
+// nextWaitTask is called with d.lock held. A paused task must never be
+// restarted just because it was left in the in-memory waiting queue.
+func (d *Downloader) nextWaitTask() *Task {
+	for len(d.waitTasks) > 0 {
+		task := d.waitTasks[0]
+		d.waitTasks = d.waitTasks[1:]
+		if task != nil && task.Status == base.DownloadStatusWait {
+			return task
+		}
+	}
+	return nil
 }
 
 func (d *Downloader) remainRunningCount() int {
@@ -360,17 +371,34 @@ func (d *Downloader) Pause(filter *TaskFilter) (err error) {
 		return d.pauseAll()
 	}
 
-	filter.NotStatuses = []base.Status{base.DownloadStatusPause, base.DownloadStatusError, base.DownloadStatusDone}
-	pauseTasks := d.GetTasksByFilter(filter)
+	d.lock.Lock()
+	selected := *filter
+	selected.NotStatuses = append(append([]base.Status(nil), filter.NotStatuses...),
+		base.DownloadStatusPause, base.DownloadStatusError, base.DownloadStatusDone)
+	pauseTasks := d.GetTasksByFilter(&selected)
 	if len(pauseTasks) == 0 {
+		d.lock.Unlock()
 		return ErrTaskNotFound
 	}
 
+	paused := make(map[*Task]struct{}, len(pauseTasks))
 	for _, task := range pauseTasks {
 		if err = d.doPause(task); err != nil {
+			d.lock.Unlock()
 			return
 		}
+		paused[task] = struct{}{}
 	}
+	// Filtered pauses must also remove queued tasks from the scheduler. Merely
+	// changing their status lets notifyRunning start them again later.
+	remaining := d.waitTasks[:0]
+	for _, task := range d.waitTasks {
+		if _, ok := paused[task]; !ok {
+			remaining = append(remaining, task)
+		}
+	}
+	d.waitTasks = remaining
+	d.lock.Unlock()
 	d.notifyRunning()
 
 	return
@@ -680,7 +708,9 @@ func (d *Downloader) GetTask(id string) *Task {
 }
 
 func (d *Downloader) GetTasks() []*Task {
-	return d.tasks
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	return append([]*Task(nil), d.tasks...)
 }
 
 // GetTasksByFilter get tasks by filter, if filter is nil, return all tasks

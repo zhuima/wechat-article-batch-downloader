@@ -221,8 +221,8 @@ func (c *Config) LoadConfig() error {
 	Register(ConfigItem{
 		Key:         "debug.error",
 		Type:        ConfigTypeBool,
-		Default:     true,
-		Description: "是否全局捕获前端错误，出现错误时弹窗展示错误信息",
+		Default:     false,
+		Description: "调试时在页面角落显示不含链接的错误提示",
 		Title:       "错误展示",
 		Group:       "Debug",
 	})

@@ -1,6 +1,6 @@
 module mp_article_batch_downloader
 
-go 1.21
+go 1.22
 
 exclude (
 	github.com/andybalholm/brotli v1.2.0
@@ -24,6 +24,7 @@ exclude (
 
 require (
 	github.com/GopeedLab/gopeed v0.0.0-00010101000000-000000000000
+	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/adrg/xdg v0.4.0
 	github.com/andybalholm/brotli v1.1.1
 	github.com/blang/semver v3.5.1+incompatible
@@ -47,13 +48,14 @@ require (
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.4.1 // indirect
-	github.com/PuerkitoBio/goquery v1.8.1 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	golang.org/x/exp v0.0.0-20240613232115-7f521ea00fb8 // indirect
 	golang.org/x/image v0.23.0 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
 replace github.com/GopeedLab/gopeed => ./pkg/gopeed
+replace github.com/ltaoo/echo => ./third_party/echo
 
 // replace github.com/qtgolang/SunnyNet => ./pkg/SunnyNet
 
@@ -148,6 +150,7 @@ require (
 	github.com/vishvananda/netns v0.0.4 // indirect
 	github.com/xiaoqidun/setft v0.0.0-20220310121541-be86327699ad // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
+	github.com/yuin/goldmark v1.7.13
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.etcd.io/bbolt v1.3.8 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
@@ -155,7 +158,7 @@ require (
 	golang.org/x/crypto v0.14.0 // indirect
 	golang.org/x/oauth2 v0.13.0 // indirect
 	golang.org/x/sync v0.12.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/sys v0.31.0
 	golang.org/x/term v0.30.0 // indirect
 	golang.org/x/time v0.7.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect

@@ -8,23 +8,29 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	stdhtml "html"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown"
+	"github.com/JohannesKaufmann/html-to-markdown/plugin"
 	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/net/html"
 )
 
-var md_convert = htmltomarkdown.NewConverter("", true, nil)
+// The local reader supports GFM tables. Without this plugin the converter
+// concatenates WeChat's <th>/<td> contents into a single paragraph.
+var md_convert = htmltomarkdown.NewConverter("", true, nil).Use(plugin.Table())
 
 type ArticleAuthCredential struct {
 	Uin        string
@@ -140,6 +146,57 @@ type ArticleExportRecord struct {
 	TextPath     string `json:"text_path"`
 }
 
+// Keep only the article's stable public identity in the export journal. The
+// source request can contain short-lived WeChat session credentials; the
+// journal is long lived and must never persist those query parameters.
+func stableExportArticleURL(raw string) string {
+	u, err := url.Parse(stdhtml.UnescapeString(strings.TrimSpace(raw)))
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || !strings.EqualFold(u.Host, "mp.weixin.qq.com") ||
+		u.User != nil || u.Opaque != "" || u.EscapedPath() != u.Path {
+		return ""
+	}
+	if u.Path != "/s" && u.Path != "/s/" && u.Path != "/mp/appmsg/show" {
+		if !strings.HasPrefix(u.Path, "/s/") {
+			return ""
+		}
+		slug := strings.TrimPrefix(u.Path, "/s/")
+		if len(slug) == 0 || len(slug) > 256 || strings.IndexFunc(slug, func(r rune) bool {
+			return !(r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r == '_' || r == '-')
+		}) != -1 {
+			return ""
+		}
+	}
+	query := u.Query()
+	stableQuery := url.Values{}
+	keys := []string{"__biz", "mid", "idx", "sn"}
+	if u.Path == "/mp/appmsg/show" {
+		keys = []string{"__biz", "appmsgid", "itemidx", "sign"}
+	} else if u.Path == "/s" || u.Path == "/s/" {
+		if query.Get("__biz") == "" || query.Get("mid") == "" || query.Get("idx") == "" {
+			return ""
+		}
+	}
+	if u.Path == "/mp/appmsg/show" && (query.Get("__biz") == "" || query.Get("appmsgid") == "" || query.Get("itemidx") == "") {
+		return ""
+	}
+	for _, key := range keys {
+		if value := query.Get(key); value != "" {
+			stableQuery.Set(key, value)
+		}
+	}
+	if u.Path == "/s" || u.Path == "/s/" {
+		for _, key := range []string{"chksm", "scene"} {
+			if value := query.Get(key); value != "" {
+				stableQuery.Set(key, value)
+			}
+		}
+	}
+	u.Scheme = "https"
+	u.Fragment = ""
+	u.RawQuery = stableQuery.Encode()
+	return u.String()
+}
+
 func (c *OfficialAccountDownload) ExportURL(url string, dirPath string, baseName string, needCompress bool) error {
 	article, err := c.FetchArticle(url)
 	if err != nil {
@@ -194,7 +251,7 @@ func (c *OfficialAccountDownload) ExportArticle(article *WechatOfficialArticle, 
 	record := ArticleExportRecord{
 		Title:        article.Title,
 		Author:       firstNonEmpty(article.Creator, article.AuthorNickname),
-		URL:          sourceURL,
+		URL:          stableExportArticleURL(sourceURL),
 		PublishTime:  article.PublishTimeStr,
 		Text:         text,
 		HTMLPath:     filepath.ToSlash(filepath.Join("html", baseName+".html")),
@@ -256,6 +313,34 @@ func cleanExportBaseName(name string) string {
 	name = strings.ReplaceAll(name, "/", "_")
 	name = strings.ReplaceAll(name, "\\", "_")
 	name = strings.TrimSpace(name)
+	if runtime.GOOS == "windows" {
+		name = cleanWindowsExportBaseName(name)
+	}
+	return name
+}
+
+// Windows rejects these characters and device names even when the name has an
+// extension. Keep the macOS/Linux naming behavior unchanged.
+func cleanWindowsExportBaseName(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if r < 0x20 || strings.ContainsRune(`<>:"|?*`, r) {
+			return '_'
+		}
+		return r
+	}, name)
+	name = strings.TrimRight(name, " .")
+	stem := strings.ToUpper(strings.TrimRight(strings.SplitN(name, ".", 2)[0], " "))
+	switch stem {
+	case "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$":
+		return "_" + name
+	}
+	runes := []rune(stem)
+	if len(runes) == 4 && (strings.HasPrefix(stem, "COM") || strings.HasPrefix(stem, "LPT")) {
+		last := runes[3]
+		if last >= '1' && last <= '9' || last == '¹' || last == '²' || last == '³' {
+			return "_" + name
+		}
+	}
 	return name
 }
 
@@ -318,7 +403,7 @@ func appendArticleJSONL(path string, record ArticleExportRecord) error {
 	if err != nil {
 		return err
 	}
-	if position, exists := index.positions[record.URL]; exists {
+	if position, exists := index.positions[record.URL]; record.URL != "" && exists {
 		index.lines[position] = line
 		return writeArticleJSONL(path, index.lines)
 	}
@@ -338,7 +423,9 @@ func appendArticleJSONL(path string, record ArticleExportRecord) error {
 	if err = file.Close(); err != nil {
 		return err
 	}
-	index.positions[record.URL] = len(index.lines)
+	if record.URL != "" {
+		index.positions[record.URL] = len(index.lines)
+	}
 	index.lines = append(index.lines, line)
 	return nil
 }
@@ -439,34 +526,6 @@ func (c *OfficialAccountDownload) ConvertHtmlToMarkdownFile(article *WechatOffic
 	if err != nil {
 		return err
 	}
-
-	// Preserve newlines in text nodes by replacing them with a placeholder
-	// This is needed because HTML parsers and markdown converters often treat newlines as whitespace
-	newlinePlaceholder := "WECHATNEWLINEHOLDER"
-	var replaceNewlines func(*html.Node)
-	replaceNewlines = func(n *html.Node) {
-		if n.Type == html.TextNode {
-			if strings.Contains(n.Data, "\n") {
-				n.Data = strings.ReplaceAll(n.Data, "\n", newlinePlaceholder)
-			}
-			return
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			if c.Type == html.ElementNode {
-				tag := strings.ToLower(c.Data)
-				// Skip pre-formatted blocks where newlines should be preserved naturally
-				if tag == "pre" || tag == "code" || tag == "script" || tag == "style" {
-					continue
-				}
-			}
-			replaceNewlines(c)
-		}
-	}
-
-	for _, n := range doc.Nodes {
-		replaceNewlines(n)
-	}
-
 	doc.Find("mp-common-mpaudio").Each(func(i int, s *goquery.Selection) {
 		voiceEncodeFileId := s.AttrOr("voice_encode_fileid", "")
 		if voiceEncodeFileId != "" {
@@ -516,7 +575,7 @@ func (c *OfficialAccountDownload) ConvertHtmlToMarkdownFile(article *WechatOffic
 			localFileName, err := c.downloadImage(imgURL, imagesDirPath)
 			if err == nil {
 				// Replace src with local relative path
-				relativePath := filepath.Join(imagesDirName, localFileName)
+				relativePath := path.Join(imagesDirName, localFileName)
 				s.SetAttr("src", relativePath)
 				// Remove data-src to ensure markdown converter uses src
 				s.RemoveAttr("data-src")
@@ -531,25 +590,10 @@ func (c *OfficialAccountDownload) ConvertHtmlToMarkdownFile(article *WechatOffic
 		return err
 	}
 
-	// Workaround for <br> handling: Replace <br> with a placeholder to ensure it's preserved as a hard break
-	// html-to-markdown/v2 might handle <br> differently depending on context or configuration.
-	// We want explicit hard breaks (two spaces + newline) for every <br> tag.
-	brPlaceholder := "WECHATBRHOLDER"
-	// Replace the newline placeholder with the break placeholder
-	newHTML = strings.ReplaceAll(newHTML, "WECHATNEWLINEHOLDER", brPlaceholder)
-
-	// goquery normalizes to <br/> but we handle all cases just to be safe
-	newHTML = strings.ReplaceAll(newHTML, "<br/>", brPlaceholder)
-	newHTML = strings.ReplaceAll(newHTML, "<br>", brPlaceholder)
-	newHTML = strings.ReplaceAll(newHTML, "<br />", brPlaceholder)
-
-	markdown, err := md_convert.ConvertString(newHTML)
+	markdown, err := ConvertArticleHTMLToMarkdown(newHTML)
 	if err != nil {
 		return err
 	}
-
-	// Restore line breaks
-	markdown = strings.ReplaceAll(markdown, brPlaceholder, "  \n")
 
 	// Process additional images from article.Images
 	if len(article.Images) > 0 {
@@ -560,7 +604,7 @@ func (c *OfficialAccountDownload) ConvertHtmlToMarkdownFile(article *WechatOffic
 				fmt.Printf("Failed to download attached image %s: %v\n", imgURL, err)
 				continue
 			}
-			relative_path := filepath.Join(imagesDirName, localFileName)
+			relative_path := path.Join(imagesDirName, localFileName)
 			markdown += fmt.Sprintf("\n![image](%s)\n", relative_path)
 		}
 	}
@@ -993,7 +1037,7 @@ func (c *OfficialAccountDownload) FetchArticle(url string) (*WechatOfficialArtic
 	}
 	article := &WechatOfficialArticle{
 		Type:           data.PageType,
-		Title:          data.Title,
+		Title:          stdhtml.UnescapeString(data.Title),
 		Content:        data.ContentNoEncode,
 		PublishTimeStr: publish_time_str,
 		ContentLength:  len(data.ContentNoEncode),
@@ -1017,76 +1061,95 @@ func (c *OfficialAccountDownload) FetchArticle(url string) (*WechatOfficialArtic
 }
 
 func (c *OfficialAccountDownload) Scrape(rawURL string) ([]byte, error) {
-	interval := c.ArticleRequestInterval
-	maxAttempts := 1
-	if interval > 0 && interval < safeArticleRequestInterval {
-		maxAttempts = 3
+	// Author-history links can contain chksm and scene values that WeChat needs
+	// to serve the article. Request the supplied URL byte-for-byte first. An
+	// unrelated account session must not be appended to a working share link.
+	body, err := c.scrapeOnce(rawURL, c.ArticleRequestInterval, false)
+	if err == nil || !isWeChatAccessVerificationError(err) || !canRetryArticleWithStoredAuth(rawURL) {
+		return body, err
 	}
-	var lastErr error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		requestInterval := interval
-		if attempt > 0 {
-			// A verification response is often a short-lived rate limit. Slow the
-			// retry down before asking the user to reconnect in WeChat.
-			time.Sleep(time.Duration(attempt*3) * time.Second)
-			requestInterval = safeArticleRequestInterval
-		}
-		body, err := c.scrapeOnce(rawURL, requestInterval)
-		if err == nil {
-			return body, nil
-		}
-		lastErr = err
-		if !isWeChatAccessVerificationError(err) {
-			break
-		}
+	if target, cookie := articleRequestTarget(rawURL, true); target == rawURL && cookie == "" {
+		return body, err
 	}
-	return nil, lastErr
+	// The old four-field archive format discarded the source link's other
+	// parameters. Give that legacy form one bounded attempt with stored account
+	// credentials; never apply this fallback to a complete author-history URL.
+	time.Sleep(3 * time.Second)
+	return c.scrapeOnce(rawURL, safeArticleRequestInterval, true)
 }
 
-func (c *OfficialAccountDownload) scrapeOnce(rawURL string, interval time.Duration) ([]byte, error) {
+// canRetryArticleWithStoredAuth accepts only the exact URL shapes that the
+// archive's former StableURL function produced. Other query parameters may be
+// part of a signed WeChat link, so changing them could invalidate that link.
+func canRetryArticleWithStoredAuth(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Host, "mp.weixin.qq.com") || u.User != nil {
+		return false
+	}
+	q, err := url.ParseQuery(u.RawQuery)
+	if err != nil || q.Get("__biz") == "" {
+		return false
+	}
+	allowed := map[string]bool{"__biz": true}
+	switch u.Path {
+	case "/s":
+		for _, key := range []string{"mid", "idx", "sn"} {
+			if q.Get(key) == "" {
+				return false
+			}
+			allowed[key] = true
+		}
+	case "/mp/appmsg/show":
+		for _, key := range []string{"appmsgid", "itemidx", "sign"} {
+			if q.Get(key) == "" {
+				return false
+			}
+			allowed[key] = true
+		}
+	default:
+		return false
+	}
+	for key, values := range q {
+		if !allowed[key] || len(values) != 1 {
+			return false
+		}
+	}
+	return true
+}
+
+func articleRequestTarget(rawURL string, useStoredAuth bool) (string, string) {
+	if !useStoredAuth || ArticleAuthProvider == nil || !canRetryArticleWithStoredAuth(rawURL) {
+		return rawURL, ""
+	}
+	parsed, _ := url.Parse(rawURL) // Validated by canRetryArticleWithStoredAuth.
+	query := parsed.Query()
+	auth := ArticleAuthProvider(query.Get("__biz"))
+	if auth.Uin != "" {
+		query.Set("uin", auth.Uin)
+	}
+	if auth.Key != "" {
+		query.Set("key", auth.Key)
+	}
+	if auth.PassTicket != "" {
+		query.Set("pass_ticket", auth.PassTicket)
+	}
+	if auth.Uin != "" || auth.Key != "" || auth.PassTicket != "" {
+		query.Set("devicetype", "UnifiedPCMac")
+		query.Set("version", "f2640619")
+		query.Set("lang", "zh_CN")
+		query.Set("ascene", "1")
+		query.Set("acctmode", "0")
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), auth.Cookie
+}
+
+func (c *OfficialAccountDownload) scrapeOnce(rawURL string, interval time.Duration, useStoredAuth bool) ([]byte, error) {
 	if rawURL == "" {
 		return nil, fmt.Errorf("url is empty")
 	}
 	waitForArticleRequestSlot(interval)
-	targetURL := rawURL
-	var auth ArticleAuthCredential
-	if ArticleAuthProvider != nil {
-		if parsed, parseErr := url.Parse(rawURL); parseErr == nil {
-			biz := parsed.Query().Get("__biz")
-			if biz != "" {
-				auth = ArticleAuthProvider(biz)
-				query := parsed.Query()
-				if auth.Uin != "" && query.Get("uin") == "" {
-					query.Set("uin", auth.Uin)
-				}
-				if auth.Key != "" && query.Get("key") == "" {
-					query.Set("key", auth.Key)
-				}
-				if auth.PassTicket != "" && query.Get("pass_ticket") == "" {
-					query.Set("pass_ticket", auth.PassTicket)
-				}
-				if auth.Uin != "" || auth.Key != "" || auth.PassTicket != "" {
-					if query.Get("devicetype") == "" {
-						query.Set("devicetype", "UnifiedPCMac")
-					}
-					if query.Get("version") == "" {
-						query.Set("version", "f2640619")
-					}
-					if query.Get("lang") == "" {
-						query.Set("lang", "zh_CN")
-					}
-					if query.Get("ascene") == "" {
-						query.Set("ascene", "1")
-					}
-					if query.Get("acctmode") == "" {
-						query.Set("acctmode", "0")
-					}
-				}
-				parsed.RawQuery = query.Encode()
-				targetURL = parsed.String()
-			}
-		}
-	}
+	targetURL, cookie := articleRequestTarget(rawURL, useStoredAuth)
 	client := &http.Client{Timeout: 45 * time.Second}
 	req, err := http.NewRequest("GET", targetURL, nil)
 	if err != nil {
@@ -1106,8 +1169,8 @@ func (c *OfficialAccountDownload) scrapeOnce(rawURL string, interval time.Durati
 	req.Header.Set("sec-fetch-user", "?1")
 	req.Header.Set("upgrade-insecure-requests", "1")
 	req.Header.Set("user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36")
-	if auth.Cookie != "" {
-		req.Header.Set("cookie", auth.Cookie)
+	if cookie != "" {
+		req.Header.Set("cookie", cookie)
 
 	}
 	resp, err := client.Do(req)

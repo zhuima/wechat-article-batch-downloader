@@ -26,24 +26,28 @@ import (
 	downloaderclient "mp_article_batch_downloader/internal/downloader"
 	"mp_article_batch_downloader/internal/officialaccount"
 	"mp_article_batch_downloader/pkg/decrypt"
+	"mp_article_batch_downloader/pkg/safelog"
 	"mp_article_batch_downloader/pkg/system"
 	"mp_article_batch_downloader/pkg/util"
 )
 
 type APIClient struct {
-	taskCreateMu  sync.Mutex
-	taskErrorMu   sync.Mutex
-	taskErrors    map[string]string
-	archive       *archive.Manager
-	downloader    *downloadpkg.Downloader
-	official      *officialaccount.OfficialAccountClient
-	channels      *channels.ChannelsClient
-	downloader_ws *downloaderclient.DownloaderClient
-	filehelper    *FileHelperHandler
-	formatter     *util.FilenameProcessor
-	cfg           *APIConfig
-	engine        *gin.Engine
-	logger        *zerolog.Logger
+	taskCreateMu        sync.Mutex
+	wereadMu            sync.Mutex
+	taskErrorMu         sync.Mutex
+	taskErrors          map[string]string
+	batchVerificationMu sync.Mutex
+	blockedBatches      map[string]struct{}
+	archive             *archive.Manager
+	downloader          *downloadpkg.Downloader
+	official            *officialaccount.OfficialAccountClient
+	channels            *channels.ChannelsClient
+	downloader_ws       *downloaderclient.DownloaderClient
+	filehelper          *FileHelperHandler
+	formatter           *util.FilenameProcessor
+	cfg                 *APIConfig
+	engine              *gin.Engine
+	logger              *zerolog.Logger
 }
 
 func NewAPIClient(cfg *APIConfig, parent_logger *zerolog.Logger) *APIClient {
@@ -94,6 +98,14 @@ func NewAPIClient(cfg *APIConfig, parent_logger *zerolog.Logger) *APIClient {
 	downloader_ws.OnMessage = func(client *downloaderclient.WSClient, message []byte) {
 	}
 	logger := parent_logger.With().Str("Client", "api_client").Logger()
+	engine := gin.New()
+	engine.Use(gin.LoggerWithFormatter(func(params gin.LogFormatterParams) string {
+		// Gin's default formatter includes RawQuery, which can contain temporary
+		// WeChat credentials and the local refresh token.
+		return fmt.Sprintf("[GIN] %s | %d | %s | %s | %s %q\n",
+			params.TimeStamp.Format("2006/01/02 - 15:04:05"), params.StatusCode,
+			params.Latency, params.ClientIP, params.Method, params.Request.URL.Path)
+	}), gin.RecoveryWithWriter(safelog.NewWriter(gin.DefaultErrorWriter)))
 	client := &APIClient{
 		downloader:    downloader,
 		official:      officialaccount_client,
@@ -102,7 +114,7 @@ func NewAPIClient(cfg *APIConfig, parent_logger *zerolog.Logger) *APIClient {
 		filehelper:    NewFileHelperHandler(),
 		formatter:     util.NewFilenameProcessor(cfg.DownloadDir, make(map[string]int)),
 		cfg:           cfg,
-		engine:        gin.Default(),
+		engine:        engine,
 		logger:        &logger,
 	}
 
@@ -158,7 +170,7 @@ func (c *APIClient) Start() error {
 			return
 		}
 		c.recordTaskError(evt)
-		c.pauseFastBatchOnVerification(evt)
+		c.pauseBatchOnVerification(evt)
 		c.downloader_ws.Broadcast(APIClientWSMessage{
 			Type: "event",
 			Data: evt,

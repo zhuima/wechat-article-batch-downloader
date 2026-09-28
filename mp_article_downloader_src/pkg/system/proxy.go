@@ -1,5 +1,7 @@
 package system
 
+import "runtime"
+
 type ProxySettings struct {
 	Device   string
 	Hostname string
@@ -40,4 +42,15 @@ func DisableProxy(arg ProxySettings) error {
 
 func FetchCurProxy(arg ProxySettings) (*ProxySettings, error) {
 	return fetch_cur_proxy(arg)
+}
+
+// IsDesktopProxyCaptureActive reports whether the current Windows HTTPS system
+// proxy points at the desktop client's local interceptor. It checks live system
+// settings rather than the settings requested when the client started.
+func IsDesktopProxyCaptureActive() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	current, err := FetchCurProxy(ProxySettings{})
+	return err == nil && current != nil && current.Hostname == "127.0.0.1" && current.Port == "2133"
 }

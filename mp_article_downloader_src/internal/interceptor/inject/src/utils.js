@@ -317,29 +317,38 @@ var WXU = (() => {
    * @param {LogMsg} params
    */
   function __wx_log(params) {
-    console.log("[log]", params);
+    if (location.hostname !== "channels.weixin.qq.com") return;
     fetch("/__wx_channels_api/tip", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(params),
-    });
+    }).catch(function () {});
   }
   /**
    * @param {ErrorMsg} params
    */
   function __wx_error(params) {
     var _alert = params.alert ?? 1;
-    fetch("/__wx_channels_api/error", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(params),
-    });
+    var message = String(params.msg || "操作失败");
+    // Error strings can include signed WeChat article URLs. Never put them in
+    // a page banner or the diagnostic endpoint.
+    if (/https?:\/\/|(?:^|[?&\s])(?:key|pass_ticket|uin|appmsg_token|token|sn|chksm)=/i.test(message)) {
+      message = "操作失败（详细链接已隐藏）";
+    }
+    message = message.slice(0, 200);
+    // This endpoint belongs to the channels proxy, not mp.weixin.qq.com.
+    // A failed diagnostic request must not create an unhandled rejection.
+    if (location.hostname === "channels.weixin.qq.com") {
+      fetch("/__wx_channels_api/error", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ msg: message }),
+      }).catch(function () {});
+    }
     if (_alert) {
-      weui.topTips(params.msg);
+      weui.topTips(message);
     }
   }
   const script_loaded_map = {};
@@ -1196,7 +1205,7 @@ var WXU = (() => {
         };
         xhr.onerror = function (err) {
           // console.log("[request]xhr.onerror", err);
-          resolve([new Error(err.type), null]);
+          resolve([new Error("网络请求失败，请检查客户端后台连接"), null]);
         };
         xhr.send(JSON.stringify(opt.body));
       });
@@ -2030,4 +2039,6 @@ WXU.onInit((data) => {
 });
 
 const ws_client$ = ChannelsWebsocketClient();
-ws_client$.methods.connect_local_ws();
+if (location.hostname === "channels.weixin.qq.com") {
+  ws_client$.methods.connect_local_ws();
+}

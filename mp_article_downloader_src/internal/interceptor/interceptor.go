@@ -3,6 +3,7 @@ package interceptor
 import (
 	"fmt"
 	"io"
+	stdlog "log"
 	"net"
 	"net/http"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"mp_article_batch_downloader/internal/buildtags"
 	"mp_article_batch_downloader/internal/interceptor/proxy"
 	"mp_article_batch_downloader/pkg/certificate"
+	"mp_article_batch_downloader/pkg/safelog"
 	"mp_article_batch_downloader/pkg/system"
 )
 
@@ -42,8 +44,18 @@ func NewInterceptor(cfg *InterceptorConfig, cert *certificate.CertFileAndKeyFile
 	}
 }
 
+func configureProxyLogging(debug bool) {
+	// Echo changes the default log package's writer, including when debug mode
+	// enables its decrypted HTTPS request logs. Install redaction *after* Echo
+	// selects the writer; a one-time wrapper would be lost on a later restart.
+	echo.SetLogEnabled(debug)
+	if debug {
+		stdlog.SetOutput(safelog.NewWriter(stdlog.Writer()))
+	}
+}
+
 func (c *Interceptor) Start() error {
-	echo.SetLogEnabled(c.Debug)
+	configureProxyLogging(c.Debug)
 	client, err := proxy.NewProxy(c.Cert.Cert, c.Cert.PrivateKey, c.Settings.ProxyUpstreamProxy, c.Settings.ProxyTun, c.Settings.ProxyServerHostname, c.Settings.ProxyServerPort, c.Settings.ProxyDefaultInterface, &proxy.TCPRelayConfig{
 		Enabled:  c.Settings.ProxyTCPRelayEnabled,
 		Hostname: c.Settings.ProxyTCPRelayHostname,
@@ -91,7 +103,7 @@ func (c *Interceptor) Start() error {
 	}
 	c.proxy = client
 	if !c.Settings.ProxySkipInstallRootCert {
-		existing, err := certificate.CheckHasCertificate(c.Cert.Name)
+		existing, err := certificate.CheckInstalled(c.Cert.Cert)
 		if err != nil {
 			return fmt.Errorf("检查证书失败: %v", err)
 		}
@@ -112,6 +124,9 @@ func (c *Interceptor) Start() error {
 		}
 	}
 	if err := client.Start(c.Settings.ProxyServerPort); err != nil {
+		if !buildtags.UsingSunnyNet && c.Settings.ProxySetSystem && !c.Settings.ProxyTun {
+			_ = system.DisableProxy(system.ProxySettings{})
+		}
 		return err
 	}
 	return nil

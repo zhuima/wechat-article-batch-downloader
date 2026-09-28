@@ -495,7 +495,7 @@ func (c *APIClient) handleProbeMPArticle(ctx *gin.Context) {
 	oa := &officialaccountdownload.OfficialAccountDownload{}
 	article, err := oa.FetchArticle(body.URL)
 	if err != nil {
-		result.Err(ctx, 500, "探测文章失败："+err.Error())
+		result.Err(ctx, 500, "探测文章失败："+safeArticleProbeError(err))
 		return
 	}
 	mode := "full"
@@ -511,6 +511,28 @@ func (c *APIClient) handleProbeMPArticle(ctx *gin.Context) {
 		"publish_time":    article.PublishTimeStr,
 		"author_nickname": article.AuthorNickname,
 	})
+}
+
+// FetchArticle may return a net/http error containing the full request URL,
+// including credentials added by the article fetcher. Only fixed messages are
+// safe to send to the browser.
+func safeArticleProbeError(err error) string {
+	if err == nil {
+		return "无法读取文章，请稍后重试"
+	}
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "访问验证"), strings.Contains(message, "凭证已失效"):
+		return "微信要求完成访问验证，请在微信中打开文章后重试"
+	case strings.Contains(message, "文章已被发布者删除"):
+		return "文章已被发布者删除"
+	case strings.Contains(message, "文章已被微信限制"):
+		return "文章已被微信限制，正文无法查看"
+	case strings.Contains(message, "timeout"), strings.Contains(message, "deadline exceeded"), strings.Contains(message, "超时"):
+		return "访问微信文章超时，请稍后重试"
+	default:
+		return "无法读取文章，请稍后重试"
+	}
 }
 
 func articlePlainTextForProbe(content string) string {
@@ -687,6 +709,7 @@ func (c *APIClient) handleFetchTaskList(ctx *gin.Context) {
 	}
 	pageItems := list[start:end]
 	items := make([]map[string]interface{}, 0, len(pageItems))
+	readerTargets := newTaskLocalArticleResolver(c)
 	for _, task := range pageItems {
 		item := map[string]interface{}{}
 		if data, err := json.Marshal(task); err == nil {
@@ -698,6 +721,11 @@ func (c *APIClient) handleFetchTaskList(ctx *gin.Context) {
 		c.taskErrorMu.Unlock()
 		item["files_exist"] = exists
 		item["expected_files"] = expected
+		if exists {
+			if article := readerTargets.resolve(task); article != nil {
+				item["local_article"] = article
+			}
+		}
 		items = append(items, item)
 	}
 	result.Ok(ctx, gin.H{

@@ -13,6 +13,9 @@ var preview_home []byte
 //go:embed ui/filehelper.html
 var filehelper_home []byte
 
+//go:embed ui/desktop.html
+var desktop_home []byte
+
 type Assets struct {
 	HTMLHome       []byte
 	HTMLPreview    []byte

@@ -3,121 +3,289 @@
 package system
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
-	"os/exec"
-	"strconv"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
+	"unsafe"
+
+	"golang.org/x/sys/windows/registry"
 )
+
+const internetSettingsKey = `Software\Microsoft\Windows\CurrentVersion\Internet Settings`
+
+type windowsProxySnapshot struct {
+	Enabled       uint64 `json:"enabled"`
+	EnabledExists bool   `json:"enabled_exists"`
+	Server        string `json:"server"`
+	ServerExists  bool   `json:"server_exists"`
+	ServerType    uint32 `json:"server_type"`
+	Owner         string `json:"owner"`
+}
+
+func snapshotPath() string {
+	if dir := os.Getenv("MP_ARCHIVE_DATA"); dir != "" {
+		return filepath.Join(dir, "proxy-snapshot.json")
+	}
+	dir, _ := os.UserConfigDir()
+	return filepath.Join(dir, "MPArticleDownloader", "proxy-snapshot.json")
+}
+
+func readWindowsProxy(k registry.Key) (windowsProxySnapshot, error) {
+	var state windowsProxySnapshot
+	value, _, err := k.GetIntegerValue("ProxyEnable")
+	if err == nil {
+		state.Enabled, state.EnabledExists = value, true
+	} else if !errors.Is(err, registry.ErrNotExist) {
+		return state, fmt.Errorf("读取系统代理开关失败: %w", err)
+	}
+	server, valueType, err := k.GetStringValue("ProxyServer")
+	if err == nil {
+		state.Server, state.ServerType, state.ServerExists = server, valueType, true
+	} else if !errors.Is(err, registry.ErrNotExist) {
+		return state, fmt.Errorf("读取系统代理地址失败: %w", err)
+	}
+	return state, nil
+}
+
+func writeWindowsProxy(k registry.Key, state windowsProxySnapshot) error {
+	if state.ServerExists {
+		var err error
+		if state.ServerType == registry.EXPAND_SZ {
+			err = k.SetExpandStringValue("ProxyServer", state.Server)
+		} else {
+			err = k.SetStringValue("ProxyServer", state.Server)
+		}
+		if err != nil {
+			return err
+		}
+	} else if err := k.DeleteValue("ProxyServer"); err != nil && !errors.Is(err, registry.ErrNotExist) {
+		return err
+	}
+	if state.EnabledExists {
+		return k.SetDWordValue("ProxyEnable", uint32(state.Enabled))
+	}
+	if err := k.DeleteValue("ProxyEnable"); err != nil && !errors.Is(err, registry.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+const (
+	internetOptionSettingsChanged = 39
+	internetOptionRefresh         = 37
+	windowMessageSettingChange    = 0x001A
+	hwndBroadcast                 = 0xffff
+	smtoAbortIfHung               = 0x0002
+	proxyBroadcastTimeoutMillis   = 2000
+)
+
+func windowsCallError(operation string, callErr error) error {
+	if callErr == nil || errors.Is(callErr, syscall.Errno(0)) {
+		return fmt.Errorf("%s 调用失败", operation)
+	}
+	return fmt.Errorf("%s 调用失败: %w", operation, callErr)
+}
+
+func internetSetOption(option uintptr) error {
+	proc := syscall.NewLazyDLL("wininet.dll").NewProc("InternetSetOptionW")
+	if err := proc.Find(); err != nil {
+		return fmt.Errorf("查找 InternetSetOptionW 失败: %w", err)
+	}
+	result, _, callErr := proc.Call(0, option, 0, 0)
+	if result == 0 {
+		return windowsCallError("InternetSetOptionW", callErr)
+	}
+	return nil
+}
+
+func broadcastProxyChanged() error {
+	proc := syscall.NewLazyDLL("user32.dll").NewProc("SendMessageTimeoutW")
+	if err := proc.Find(); err != nil {
+		return fmt.Errorf("查找 SendMessageTimeoutW 失败: %w", err)
+	}
+	section, err := syscall.UTF16PtrFromString(internetSettingsKey)
+	if err != nil {
+		return err
+	}
+	var messageResult uintptr
+	result, _, callErr := proc.Call(
+		hwndBroadcast, windowMessageSettingChange, 0, uintptr(unsafe.Pointer(section)),
+		smtoAbortIfHung, proxyBroadcastTimeoutMillis, uintptr(unsafe.Pointer(&messageResult)),
+	)
+	runtime.KeepAlive(section)
+	if result == 0 {
+		return windowsCallError("SendMessageTimeoutW", callErr)
+	}
+	return nil
+}
+
+func notifyProxyChangedWith(setOption func(uintptr) error, broadcast func() error, reportBroadcastError func(error)) error {
+	var failures []error
+	if err := setOption(internetOptionSettingsChanged); err != nil {
+		failures = append(failures, err)
+	}
+	if err := setOption(internetOptionRefresh); err != nil {
+		failures = append(failures, err)
+	}
+	if err := broadcast(); err != nil {
+		// A hung window can make HWND_BROADCAST report a timeout even after
+		// other windows received the setting change. Keep the proxy usable.
+		if reportBroadcastError != nil {
+			reportBroadcastError(err)
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func notifyProxyChanged() error {
+	return notifyProxyChangedWith(internetSetOption, broadcastProxyChanged, func(err error) {
+		fmt.Fprintf(os.Stderr, "广播系统代理变更未完成: %v\n", err)
+	})
+}
+
+func restoreWindowsProxy(force bool) error {
+	data, err := os.ReadFile(snapshotPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var snapshot windowsProxySnapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil || snapshot.Owner == "" {
+		return fmt.Errorf("系统代理备份无效: %v", err)
+	}
+	k, err := registry.OpenKey(registry.CURRENT_USER, internetSettingsKey, registry.QUERY_VALUE|registry.SET_VALUE)
+	if err != nil {
+		return err
+	}
+	defer k.Close()
+	current, err := readWindowsProxy(k)
+	if err != nil {
+		return err
+	}
+	// Preserve changes made by another proxy application while this one ran.
+	var notifyErr error
+	if force || current.Enabled == 1 && current.Server == snapshot.Owner {
+		if err := writeWindowsProxy(k, snapshot); err != nil {
+			return fmt.Errorf("恢复系统代理失败: %w", err)
+		}
+		notifyErr = notifyProxyChanged()
+	}
+	return errors.Join(notifyErr, os.Remove(snapshotPath()))
+}
 
 func enable_proxy(args ProxySettings) error {
 	args = merge_default_settings(args)
-	path := `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`
-	proxy_server_url := fmt.Sprintf("%v:%v", args.Hostname, args.Port)
-	// # 启用代理
-	// reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 1 /f
-	// reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyServer /t REG_SZ /d "127.0.0.1:8080" /f
-
-	// 使用 reg 命令替代 powershell，以提高兼容性（支持 Win7）并提升性能
-	cmd := exec.Command("reg", "add", path, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "1", "/f")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("设置系统代理时发生错误，%v\n", string(output))
+	owner := net.JoinHostPort(args.Hostname, args.Port)
+	if err := restoreWindowsProxy(false); err != nil {
+		return err
 	}
-
-	cmd = exec.Command("reg", "add", path, "/v", "ProxyServer", "/t", "REG_SZ", "/d", proxy_server_url, "/f")
-	output, err = cmd.CombinedOutput()
+	k, err := registry.OpenKey(registry.CURRENT_USER, internetSettingsKey, registry.QUERY_VALUE|registry.SET_VALUE)
 	if err != nil {
-		return fmt.Errorf("设置 HTTP 代理失败，%v", string(output))
+		return fmt.Errorf("打开系统代理设置失败: %w", err)
+	}
+	defer k.Close()
+	state, err := readWindowsProxy(k)
+	if err != nil {
+		return err
+	}
+	if state.Enabled == 1 && state.Server == owner {
+		return fmt.Errorf("系统代理已指向 %s；请先关闭已有实例", owner)
+	}
+	state.Owner = owner
+	data, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(snapshotPath()), 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(snapshotPath(), data, 0600); err != nil {
+		return err
+	}
+	desired := windowsProxySnapshot{Enabled: 1, EnabledExists: true, Server: owner, ServerExists: true}
+	if err := writeWindowsProxy(k, desired); err != nil {
+		_ = restoreWindowsProxy(true)
+		return fmt.Errorf("设置系统代理失败: %w", err)
+	}
+	if err := notifyProxyChanged(); err != nil {
+		return errors.Join(fmt.Errorf("通知系统代理变更失败: %w", err), restoreWindowsProxy(true))
 	}
 	return nil
 }
 
-func disable_proxy(args ProxySettings) error {
-	path := `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`
-	// # 禁用代理
-	// reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f
+func disable_proxy(args ProxySettings) error { return restoreWindowsProxy(false) }
 
-	// 使用 reg 命令替代 powershell
-	cmd := exec.Command("reg", "add", path, "/v", "ProxyEnable", "/t", "REG_DWORD", "/d", "0", "/f")
-	output, err := cmd.CombinedOutput()
+func readOwnedWindowsProxySnapshot(owner string) error {
+	data, err := os.ReadFile(snapshotPath())
 	if err != nil {
-		return fmt.Errorf("设置 HTTP 代理失败，%v", string(output))
+		return fmt.Errorf("找不到本次启动的系统代理备份: %w", err)
+	}
+	var snapshot windowsProxySnapshot
+	if err := json.Unmarshal(data, &snapshot); err != nil || snapshot.Owner != owner {
+		return fmt.Errorf("系统代理备份不属于本次启动")
 	}
 	return nil
+}
+
+// EnsureDesktopProxy reasserts the proxy owned by this desktop session without
+// replacing the original settings snapshot. Clash Verge can update Windows
+// Internet Settings shortly after the archive client starts.
+func EnsureDesktopProxy(args ProxySettings) error {
+	args = merge_default_settings(args)
+	owner := net.JoinHostPort(args.Hostname, args.Port)
+	if err := readOwnedWindowsProxySnapshot(owner); err != nil {
+		return err
+	}
+	k, err := registry.OpenKey(registry.CURRENT_USER, internetSettingsKey, registry.QUERY_VALUE|registry.SET_VALUE)
+	if err != nil {
+		return fmt.Errorf("打开系统代理设置失败: %w", err)
+	}
+	defer k.Close()
+	current, err := readWindowsProxy(k)
+	if err != nil {
+		return err
+	}
+	return ensureWindowsProxy(current, owner, func(state windowsProxySnapshot) error {
+		return writeWindowsProxy(k, state)
+	}, notifyProxyChanged)
+}
+
+func ensureWindowsProxy(current windowsProxySnapshot, owner string, write func(windowsProxySnapshot) error, notify func() error) error {
+	if current.Enabled != 1 || current.Server != owner {
+		if err := write(windowsProxySnapshot{Enabled: 1, EnabledExists: true, Server: owner, ServerExists: true}); err != nil {
+			return fmt.Errorf("重新接入本机代理失败: %w", err)
+		}
+	}
+	return notify()
 }
 
 func fetch_cur_proxy(args ProxySettings) (*ProxySettings, error) {
-	path := `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`
-	enableValue, err := read_reg_value(path, "ProxyEnable")
+	k, err := registry.OpenKey(registry.CURRENT_USER, internetSettingsKey, registry.QUERY_VALUE)
 	if err != nil {
 		return nil, err
 	}
-	if enableValue == "" {
-		return nil, nil
-	}
-	enabled, err := parse_reg_dword(enableValue)
-	if err != nil {
+	defer k.Close()
+	state, err := readWindowsProxy(k)
+	if err != nil || state.Enabled == 0 || !state.ServerExists {
 		return nil, err
 	}
-	if enabled == 0 {
-		return nil, nil
-	}
-	serverValue, err := read_reg_value(path, "ProxyServer")
-	if err != nil {
+	host, port, err := parse_proxy_server_value(state.Server)
+	if err != nil || host == "" || port == "" {
 		return nil, err
 	}
-	if serverValue == "" {
-		return nil, nil
-	}
-	host, port, err := parse_proxy_server_value(serverValue)
-	if err != nil {
-		return nil, err
-	}
-	if host == "" || port == "" {
-		return nil, nil
-	}
-	return &ProxySettings{
-		Hostname: host,
-		Port:     port,
-	}, nil
+	return &ProxySettings{Hostname: host, Port: port}, nil
 }
 
 func get_network_interfaces() (*HardwarePort, error) {
-	return nil, errors.New("not support")
-}
-
-func read_reg_value(path string, name string) (string, error) {
-	cmd := exec.Command("reg", "query", path, "/v", name)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		outputText := string(output)
-		lower := strings.ToLower(outputText)
-		if strings.Contains(lower, "unable to find") || strings.Contains(outputText, "找不到") || strings.Contains(outputText, "无法找到") {
-			return "", nil
-		}
-		return "", fmt.Errorf("读取系统代理失败，%v", outputText)
-	}
-	for _, line := range strings.Split(string(output), "\n") {
-		if !strings.Contains(line, name) {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-		return fields[len(fields)-1], nil
-	}
-	return "", nil
-}
-
-func parse_reg_dword(value string) (int64, error) {
-	num, err := strconv.ParseInt(strings.TrimSpace(value), 0, 64)
-	if err != nil {
-		return 0, fmt.Errorf("解析系统代理开关失败: %v", err)
-	}
-	return num, nil
+	return nil, errors.New("not supported")
 }
 
 func parse_proxy_server_value(value string) (string, string, error) {
@@ -126,23 +294,27 @@ func parse_proxy_server_value(value string) (string, string, error) {
 		return "", "", nil
 	}
 	parts := strings.Split(raw, ";")
-	candidate := pick_proxy_candidate(parts, "http=")
-	if candidate == "" {
-		candidate = pick_proxy_candidate(parts, "https=")
-	}
+	// WeChat article pages use HTTPS. A different HTTP proxy does not mean
+	// article traffic reaches our interceptor.
+	candidate := pick_proxy_candidate(parts, "https=")
 	if candidate == "" {
 		for _, part := range parts {
-			part = strings.TrimSpace(part)
-			if idx := strings.Index(part, "="); idx >= 0 {
-				candidate = strings.TrimSpace(part[idx+1:])
-				break
+			if strings.Contains(part, "=") {
+				return "", "", fmt.Errorf("HTTPS 系统代理未配置")
 			}
 		}
 	}
 	if candidate == "" {
 		candidate = raw
 	}
-	return split_host_port(candidate)
+	if strings.HasPrefix(candidate, "[") {
+		return net.SplitHostPort(candidate)
+	}
+	idx := strings.LastIndex(candidate, ":")
+	if idx <= 0 || idx == len(candidate)-1 {
+		return "", "", fmt.Errorf("解析系统代理地址失败: %s", candidate)
+	}
+	return candidate[:idx], candidate[idx+1:], nil
 }
 
 func pick_proxy_candidate(parts []string, prefix string) string {
@@ -153,23 +325,4 @@ func pick_proxy_candidate(parts []string, prefix string) string {
 		}
 	}
 	return ""
-}
-
-func split_host_port(value string) (string, string, error) {
-	candidate := strings.TrimSpace(value)
-	if candidate == "" {
-		return "", "", nil
-	}
-	if strings.HasPrefix(candidate, "[") {
-		host, port, err := net.SplitHostPort(candidate)
-		if err != nil {
-			return "", "", fmt.Errorf("解析系统代理地址失败: %v", err)
-		}
-		return host, port, nil
-	}
-	idx := strings.LastIndex(candidate, ":")
-	if idx <= 0 || idx == len(candidate)-1 {
-		return "", "", fmt.Errorf("解析系统代理地址失败: %s", candidate)
-	}
-	return candidate[:idx], candidate[idx+1:], nil
 }

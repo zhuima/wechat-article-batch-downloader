@@ -1,6 +1,6 @@
 module github.com/GopeedLab/gopeed
 
-go 1.20
+go 1.22
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.4.1
@@ -26,6 +26,7 @@ require (
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/yuin/goldmark v1.7.13 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
 require (

@@ -136,6 +136,15 @@ func parse_cgi_datanew(htmlContent string) (*CgiDataNew, error) {
 	return data, nil
 }
 
+// IsDownloadableArticleHTML uses the same parser as FetchArticle to check
+// whether an imported page contains article content that the exporter can save.
+// A page with only a visible title and account name is not sufficient.
+func IsDownloadableArticleHTML(page []byte) bool {
+	data, err := parse_cgi_datanew(string(page))
+	return err == nil && data != nil &&
+		(strings.TrimSpace(data.ContentNoEncode) != "" || len(data.PicturePageInfoList) > 0 || len(data.VideoPageInfos) > 0)
+}
+
 func classifyUnavailableArticlePage(htmlContent string) error {
 	switch {
 	case strings.Contains(htmlContent, "此内容因违规无法查看"):

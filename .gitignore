@@ -13,3 +13,7 @@ macos/.build/
 macos/.swiftpm/
 dist/
 release/
+mp_article_downloader_src/third_party/echo/.claude/
+mp_article_downloader_src/third_party/echo/_example/
+mp_article_downloader_src/third_party/echo/WinDivert-2.2.2-A/
+mp_article_downloader_src/third_party/echo/docs/

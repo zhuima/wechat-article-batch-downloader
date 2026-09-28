@@ -1,6 +1,7 @@
 package officialaccount
 
 import (
+	"os"
 	"strconv"
 
 	"github.com/spf13/viper"
@@ -23,6 +24,8 @@ type OfficialAccountConfig struct {
 	RemoteServerHostname      string `json:"remoteServerHostname"`
 	RemoteServerPort          int    `json:"remoteServerPort"`
 	RefreshToken              string `json:"officialServerRefreshToken"`
+	BridgeProbeEnabled        bool   `json:"bridgeProbeEnabled"`
+	BridgeProbeTargetBiz      string `json:"bridgeProbeTargetBiz"`
 	TokenFilepath             string
 	RefreshSkipMinutes        int
 	MaxWebsocketClients       int
@@ -47,6 +50,8 @@ func NewOfficialAccountConfig(c *config.Config, remote_mode bool) *OfficialAccou
 		RemoteServerHostname:      viper.GetString("download.remoteServer.hostname"),
 		RemoteServerPort:          viper.GetInt("download.remoteServer.port"),
 		RefreshToken:              viper.GetString("mp.refreshToken"),
+		BridgeProbeEnabled:        os.Getenv("MP_ARCHIVE_BRIDGE_PROBE") == "1",
+		BridgeProbeTargetBiz:      os.Getenv("MP_ARCHIVE_BRIDGE_PROBE_BIZ"),
 		TokenFilepath:             viper.GetString("mp.tokenFilepath"),
 		Disabled:                  viper.GetBool("mp.disabled"),
 		RefreshSkipMinutes:        viper.GetInt("mp.refreshSkipMinutes"),

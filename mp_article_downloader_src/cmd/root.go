@@ -48,6 +48,11 @@ var root_cmd = &cobra.Command{
 	Short: "启动下载程序",
 	Long:  "\n启动后将对网络请求进行代理，在微信公众号文章页注入批量下载面板",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Proxy recovery must still work if config or certificate files are
+		// damaged by an interrupted first launch.
+		if cmd.Name() == "desktop-recover" {
+			return nil
+		}
 		if config_filepath != "" {
 			abs, err := filepath.Abs(config_filepath)
 			if err != nil {
@@ -72,7 +77,10 @@ var root_cmd = &cobra.Command{
 			fmt.Println(fmt.Sprintf("%s加载配置文件失败 %v", error_prefix, err))
 			os.Exit(0)
 		}
-		need_admin_for_proxy := viper.GetBool("proxy.system") || viper.GetBool("proxy.tun") || buildtags.UsingSunnyNet
+		// Windows Internet Settings and the desktop CA are per-user. Only TUN
+		// and SunnyNet need elevation; requesting it for the desktop proxy
+		// breaks launchers whose config path contains spaces or Chinese text.
+		need_admin_for_proxy := viper.GetBool("proxy.tun") || buildtags.UsingSunnyNet
 		is_admin := platform.IsAdmin()
 		if runtime.GOOS == "windows" && need_admin_for_proxy && !is_admin && !cmd.HasParent() {
 			if !platform.RequestAdminPermission() {
@@ -150,6 +158,7 @@ func root_command(cfg *config.Config) {
 		fmt.Printf("配置文件 %s\n", color.New(color.Underline).Sprint(cfg.FullPath))
 	}
 	api_cfg := api.NewAPIConfig(Cfg, false)
+	api_cfg.Shutdown = stop
 	interceptor_cfg := interceptor.NewInterceptorSettings(cfg)
 	official_cfg := officialaccount.NewOfficialAccountConfig(Cfg, false)
 	if script_byte := interceptor_cfg.InjectGlobalScript; script_byte != "" {

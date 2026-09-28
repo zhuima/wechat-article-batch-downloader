@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,68 @@ func TestIsWeChatAccessVerificationError(t *testing.T) {
 	}
 	if isWeChatAccessVerificationError(fmt.Errorf("微信返回 HTTP 500")) {
 		t.Fatal("ordinary HTTP error must not be retried as verification")
+	}
+}
+
+func TestArticleRequestKeepsCompleteHistoryURLUnchanged(t *testing.T) {
+	previous := ArticleAuthProvider
+	defer func() { ArticleAuthProvider = previous }()
+	providerCalls := 0
+	ArticleAuthProvider = func(string) ArticleAuthCredential {
+		providerCalls++
+		return ArticleAuthCredential{Uin: "old-uin", Key: "old-key", PassTicket: "old-ticket", Cookie: "old-cookie=1"}
+	}
+	// The author's original content_url works with these parameters. The
+	// formerly archived four-field version can instead hit WeChat's captcha.
+	complete := "https://mp.weixin.qq.com/s?__biz=MzTest&chksm=signed-value&idx=1&mid=123&scene=142&sn=signature"
+	if canRetryArticleWithStoredAuth(complete) {
+		t.Fatal("complete history URL must not use stored credentials")
+	}
+	for _, useStoredAuth := range []bool{false, true} {
+		target, cookie := articleRequestTarget(complete, useStoredAuth)
+		if target != complete || cookie != "" {
+			t.Fatalf("complete history URL changed: target=%q, cookie=%q", target, cookie)
+		}
+	}
+	if providerCalls != 0 {
+		t.Fatalf("credential provider called %d times for a complete URL", providerCalls)
+	}
+}
+
+func TestArticleRequestStoredAuthIsLimitedToLegacyArchiveURL(t *testing.T) {
+	previous := ArticleAuthProvider
+	defer func() { ArticleAuthProvider = previous }()
+	ArticleAuthProvider = func(biz string) ArticleAuthCredential {
+		if biz != "MzTest" {
+			t.Fatalf("unexpected account: %q", biz)
+		}
+		return ArticleAuthCredential{Uin: "uin-value", Key: "key-value", PassTicket: "ticket-value", Cookie: "account-cookie=1"}
+	}
+	legacy := "https://mp.weixin.qq.com/s?__biz=MzTest&idx=1&mid=123&sn=signature"
+	if !canRetryArticleWithStoredAuth(legacy) {
+		t.Fatal("legacy four-field URL should allow one credential retry")
+	}
+	target, cookie := articleRequestTarget(legacy, false)
+	if target != legacy || cookie != "" {
+		t.Fatal("first request must use the original URL without a cookie")
+	}
+	target, cookie = articleRequestTarget(legacy, true)
+	u, err := url.Parse(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := u.Query()
+	if cookie != "account-cookie=1" || q.Get("uin") != "uin-value" || q.Get("key") != "key-value" || q.Get("pass_ticket") != "ticket-value" || q.Get("sn") != "signature" {
+		t.Fatal("legacy credential retry did not retain article identity and session")
+	}
+	for _, invalid := range []string{
+		"https://mp.weixin.qq.com/s?__biz=MzTest&idx=1&mid=123&sn=signature&scene=142",
+		"https://mp.weixin.qq.com/s/short-slug?__biz=MzTest&idx=1&mid=123&sn=signature",
+		"https://mp.weixin.qq.com/s?__biz=MzTest&idx=1&mid=123&sn=signature&sn=second",
+	} {
+		if canRetryArticleWithStoredAuth(invalid) {
+			t.Fatalf("non-legacy URL received stored-auth fallback: %q", invalid)
+		}
 	}
 }
 
@@ -172,6 +235,7 @@ func TestExportArticleDownloadsImageOnceForMarkdownAndHTML(t *testing.T) {
 		Title:          "测试文章",
 		AuthorNickname: "测试公众号",
 		Content:        `<p>正文</p><img data-src="` + server.URL + `/image.png">`,
+		Images:         []string{server.URL + "/image.png"},
 	}
 	directory := t.TempDir()
 	if err := (&OfficialAccountDownload{}).ExportArticle(article, "https://mp.weixin.qq.com/s/test", directory, "0001-test", false); err != nil {
@@ -188,5 +252,41 @@ func TestExportArticleDownloadsImageOnceForMarkdownAndHTML(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("missing export %s: %v", path, err)
 		}
+	}
+	markdown, err := os.ReadFile(filepath.Join(directory, "markdown", "0001-test.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(markdown), "images/") || !strings.Contains(string(markdown), "![image](images/") || strings.Contains(string(markdown), `images\`) {
+		t.Fatalf("Markdown image should use a portable relative URL: %s", markdown)
+	}
+}
+
+func TestCleanWindowsExportBaseName(t *testing.T) {
+	tests := []struct{ input, want string }{
+		{`标题:问题?*<>"|`, "标题_问题______"},
+		{"line\nbreak", "line_break"},
+		{"finished. ", "finished"},
+		{"CON", "_CON"},
+		{"con.story", "_con.story"},
+		{"LPT9.report", "_LPT9.report"},
+		{"COM¹", "_COM¹"},
+		{"regular.story", "regular.story"},
+	}
+	for _, test := range tests {
+		if got := cleanWindowsExportBaseName(test.input); got != test.want {
+			t.Errorf("cleanWindowsExportBaseName(%q) = %q, want %q", test.input, got, test.want)
+		}
+	}
+}
+
+func TestCleanExportBaseNamePreservesOtherPlatformNames(t *testing.T) {
+	got := cleanExportBaseName("chapter:one?.html")
+	if runtime.GOOS == "windows" {
+		if got != "chapter_one_" {
+			t.Fatalf("Windows filename = %q", got)
+		}
+	} else if got != "chapter:one?" {
+		t.Fatalf("non-Windows filename changed: %q", got)
 	}
 }

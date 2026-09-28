@@ -1,12 +1,21 @@
 package api
 
 import (
+	"net"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
 func (c *APIClient) SetupRoutes() {
+	c.engine.GET("/desktop", func(ctx *gin.Context) {
+		if !localRequest(ctx) {
+			ctx.Status(http.StatusForbidden)
+			return
+		}
+		ctx.Header("Cache-Control", "no-store")
+		ctx.Data(http.StatusOK, "text/html; charset=utf-8", desktop_home)
+	})
 	// favicon
 	c.engine.GET("/favicon.ico", c.handleFavicon)
 	// 只在本地有的接口
@@ -25,6 +34,7 @@ func (c *APIClient) SetupRoutes() {
 		c.engine.GET("/ws/mp", c.official.HandleWebsocket)
 		c.engine.GET("/ws/manage", c.official.HandleManageWebsocket)
 		c.engine.POST("/api/mp/refresh_with_frontend", c.official.HandleRefreshOfficialAccountWithFrontend)
+		c.engine.POST("/api/mp/import_url", loopbackOnly(c.official.HandleImportURL))
 		c.engine.GET("/api/mp/ws_pool", c.official.HandleFetchOfficialAccountClients)
 		// 文件传输助手接口
 		c.engine.GET("/filehelper", c.filehelper.HandlePage)
@@ -83,6 +93,21 @@ func (c *APIClient) SetupRoutes() {
 		ctx.Header("Content-Type", "text/html; charset=utf-8")
 		ctx.String(http.StatusNotFound, "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>404 Not Found</title><style>body{margin:0;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b0c0f;color:#e6e6e6;display:flex;align-items:center;justify-content:center;height:100vh}.box{max-width:560px;padding:24px 28px;border-radius:12px;background:#14171f;box-shadow:0 8px 24px rgba(0,0,0,.3)}h1{margin:0 0 8px;font-size:24px}p{margin:0;color:#b0b0b0}a{color:#8ab4f8;text-decoration:none}a:hover{text-decoration:underline}</style></head><body><div class=\"box\"><h1>404 未找到页面</h1><p>请求的路径不存在。返回 <a href=\"/\">首页</a></p></div></body></html>")
 	})
+}
+
+func localRequest(ctx *gin.Context) bool {
+	host, _, err := net.SplitHostPort(ctx.Request.RemoteAddr)
+	return err == nil && net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
+}
+
+func loopbackOnly(handler gin.HandlerFunc) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		if !localRequest(ctx) {
+			ctx.Status(http.StatusForbidden)
+			return
+		}
+		handler(ctx)
+	}
 }
 
 func (c *APIClient) handleFavicon(ctx *gin.Context) {

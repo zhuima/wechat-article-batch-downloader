@@ -1,4 +1,8 @@
 (() => {
+  // The injected script can be evaluated again while WeChat keeps the same
+  // document alive. Keep one socket and one set of maintenance timers per page.
+  if (window.__mp_article_tools_started) return;
+  window.__mp_article_tools_started = true;
   var style = document.createElement("style");
   style.textContent = `
     #wechat-tools-container {
@@ -125,6 +129,14 @@
       color: #52605a;
       white-space: pre-wrap;
     }
+    #__mp_article_batch_panel__ .mp-batch-connection {
+      margin-top: 8px;
+      color: #8a5a15;
+      font-size: 12px;
+    }
+    #__mp_article_batch_panel__ .mp-batch-connection[data-state="synced"] {
+      color: #1f7a4d;
+    }
     #__mp_article_batch_panel__ .mp-batch-list {
       max-height: 180px;
       overflow: auto;
@@ -188,9 +200,9 @@
       body: acct,
     });
     if (err) {
-      WXU.error({
-        msg: err.message,
-      });
+      // Registration runs automatically while reading an article. A stopped
+      // local backend should not cover WeChat's page with an error banner.
+      // register_account retries on the next panel maintenance tick.
       return false;
     }
     return true;
@@ -200,7 +212,13 @@
     if (!acct || !acct.biz || !acct.key) {
       return false;
     }
-    var fingerprint = [acct.biz, acct.uin || "", acct.key].join("|");
+    var fingerprint = [
+      acct.biz,
+      acct.uin || "",
+      acct.key,
+      acct.author_id || "",
+      acct.candidate_author_id || "",
+    ].join("|");
     if (window.__mp_article_registered_credential === fingerprint) {
       return true;
     }
@@ -258,73 +276,139 @@
       payload: msg,
     });
   }
-  function connect(acct) {
-    return new Promise((resolve, reject) => {
-      if (window.__mp_article_batch_ws_connected) {
-        register_account(acct).finally(function () {
-          resolve(true);
-        });
-        return;
+  var mpConnection = {
+    socket: null,
+    account: null,
+    pingTimer: null,
+    reconnectTimer: null,
+    attempts: 0,
+    unloading: false,
+    state: "connecting",
+    message: "正在连接客户端；网页内备用操作仍可使用。",
+  };
+  function set_connection_state(state, message) {
+    mpConnection.state = state;
+    mpConnection.message = message;
+    var indicator = document.querySelector('#__mp_article_batch_panel__ [data-role="connection"]');
+    if (indicator) {
+      indicator.dataset.state = state;
+      indicator.textContent = message;
+    }
+  }
+  function sync_connected_account(acct) {
+    if (acct) mpConnection.account = acct;
+    var ws = mpConnection.socket;
+    if (!ws || ws.readyState !== 1 || mpConnection.unloading) return;
+    register_account(mpConnection.account).then(function (ok) {
+      if (mpConnection.socket !== ws || ws.readyState !== 1 || mpConnection.unloading) return;
+      if (ok) {
+        set_connection_state("synced", "已连接客户端，文章会话已同步；历史列表仍需实际读取。");
+      } else {
+        set_connection_state("pending", "客户端已连接，但当前文章会话尚未同步；网页内备用操作仍可使用。");
       }
-      const ws = new WebSocket(get_ws_origin() + "/ws/mp");
-      let ping_timer = null;
-      ws.onopen = () => {
-        window.__mp_article_batch_ws_connected = true;
-        WXU.log({
-          msg: "ws/mp connected",
-        });
-        register_account(acct);
-        var page_title = document.title || acct.nickname || "公众号页面";
-        try {
-          ws.send(
-            JSON.stringify({
-              type: "ping",
-              data: page_title,
-            }),
-          );
-        } catch (e) {
-          // ...
-        }
-        ping_timer = setInterval(() => {
-          console.log("[]ping");
-          if (ws.readyState === 1) {
-            try {
-              ws.send(
-                JSON.stringify({
-                  type: "ping",
-                  data: page_title,
-                }),
-              );
-            } catch (e) {
-              // ...
-            }
-          }
-        }, 5 * 1000);
-        resolve(true);
-      };
-      ws.onclose = () => {
-        window.__mp_article_batch_ws_connected = false;
-        console.log("ws/mp disconnected");
-        if (ping_timer) {
-          clearInterval(ping_timer);
-          ping_timer = null;
-        }
-      };
-      ws.onerror = (e) => {
-        console.error("ws/mp error", e);
-        reject(e);
-      };
-      ws.onmessage = (ev) => {
-        const [err, msg] = WXU.parseJSON(ev.data);
-        if (err) {
-          return;
-        }
-        if (msg.type === "api_call") {
-          handle_api_call(msg.data, ws);
-        }
-      };
+    }).catch(function () {
+      if (mpConnection.socket === ws && ws.readyState === 1 && !mpConnection.unloading) {
+        set_connection_state("pending", "客户端已连接，但当前文章会话尚未同步；网页内备用操作仍可使用。");
+      }
     });
   }
+  function clear_mp_ping_timer() {
+    if (mpConnection.pingTimer !== null) {
+      clearInterval(mpConnection.pingTimer);
+      mpConnection.pingTimer = null;
+    }
+  }
+  function schedule_mp_reconnect() {
+    if (mpConnection.unloading || mpConnection.reconnectTimer !== null) return;
+    var delay = Math.min(1000 * Math.pow(2, mpConnection.attempts), 10000);
+    mpConnection.attempts += 1;
+    mpConnection.reconnectTimer = setTimeout(function () {
+      mpConnection.reconnectTimer = null;
+      connect(mpConnection.account);
+    }, delay);
+  }
+  function disconnect_mp_socket(ws) {
+    if (mpConnection.socket !== ws) return;
+    clear_mp_ping_timer();
+    mpConnection.socket = null;
+    window.__mp_article_batch_ws_connected = false;
+    if (mpConnection.unloading) return;
+    set_connection_state("offline", "客户端连接已断开，正在重连；网页内备用操作仍可使用。");
+    schedule_mp_reconnect();
+  }
+  function connect(acct) {
+    if (acct) mpConnection.account = acct;
+    if (mpConnection.unloading || mpConnection.reconnectTimer !== null) return;
+    var existing = mpConnection.socket;
+    if (existing && (existing.readyState === 0 || existing.readyState === 1)) {
+      if (existing.readyState === 1) sync_connected_account(mpConnection.account);
+      return;
+    }
+    set_connection_state("connecting", "正在连接客户端；网页内备用操作仍可使用。");
+    var ws;
+    try {
+      ws = new WebSocket(get_ws_origin() + "/ws/mp");
+    } catch (_) {
+      set_connection_state("offline", "客户端暂时无法连接，正在重试；网页内备用操作仍可使用。");
+      schedule_mp_reconnect();
+      return;
+    }
+    mpConnection.socket = ws;
+    ws.onopen = function () {
+      if (mpConnection.socket !== ws || mpConnection.unloading) {
+        ws.close();
+        return;
+      }
+      mpConnection.attempts = 0;
+      window.__mp_article_batch_ws_connected = true;
+      set_connection_state("connecting", "已连接客户端，正在同步当前文章会话。");
+      var page_title = document.title || (mpConnection.account && mpConnection.account.nickname) || "公众号页面";
+      function ping() {
+        if (mpConnection.socket !== ws || ws.readyState !== 1 || mpConnection.unloading) return;
+        try {
+          ws.send(JSON.stringify({ type: "ping", data: page_title }));
+        } catch (_) {
+          ws.close();
+          disconnect_mp_socket(ws);
+        }
+      }
+      ping();
+      if (mpConnection.socket !== ws) return;
+      mpConnection.pingTimer = setInterval(ping, 5000);
+      sync_connected_account(mpConnection.account);
+    };
+    ws.onclose = function () {
+      disconnect_mp_socket(ws);
+    };
+    ws.onerror = function () {
+      // A browser may emit both error and close for one failed handshake.
+      // disconnect_mp_socket guards against a second retry timer.
+      try { ws.close(); } catch (_) {}
+      disconnect_mp_socket(ws);
+    };
+    ws.onmessage = function (ev) {
+      if (mpConnection.socket !== ws || mpConnection.unloading) return;
+      const [err, msg] = WXU.parseJSON(ev.data);
+      if (!err && msg.type === "api_call") handle_api_call(msg.data, ws);
+    };
+  }
+  window.addEventListener("pagehide", function () {
+    mpConnection.unloading = true;
+    if (mpConnection.reconnectTimer !== null) {
+      clearTimeout(mpConnection.reconnectTimer);
+      mpConnection.reconnectTimer = null;
+    }
+    clear_mp_ping_timer();
+    var ws = mpConnection.socket;
+    mpConnection.socket = null;
+    window.__mp_article_batch_ws_connected = false;
+    if (ws) ws.close();
+  });
+  window.addEventListener("pageshow", function (event) {
+    if (!event.persisted || !is_article_path(location.pathname)) return;
+    mpConnection.unloading = false;
+    connect(build_article_credentials());
+  });
   async function fetchAccountHome(params) {
     console.log("[]fetchAccountHome", params);
     return new Promise((resolve) => {
@@ -564,8 +648,11 @@
       return String(rawURL || "");
     }
   }
+  function is_article_path(pathname) {
+    return pathname === "/s" || pathname === "/s/" || /^\/s\/[A-Za-z0-9_-]{1,256}$/.test(pathname);
+  }
   function append_current_article(articles) {
-    if (location.pathname !== "/s") return articles;
+    if (!is_article_path(location.pathname)) return articles;
     var current = collect_current_article();
     if (!current.url || !current.title) return articles;
     var key = article_url_key(current.url);
@@ -619,6 +706,7 @@
     all.pagesRead = pagesRead;
     all.completed = completed;
     all.hitLimit = !completed;
+    all.scope = "author";
     return all;
   }
   async function fetch_mp_articles(acct, maxPages, onProgress) {
@@ -633,6 +721,8 @@
       await submit_credential(acct);
     } else {
       var visibleOnly = append_current_article(scan_visible_articles());
+      visibleOnly.visibleOnly = true;
+      visibleOnly.pagesRead = 0;
       onProgress(`未识别到公众号 biz，已读取当前页面可见文章：${visibleOnly.length} 篇`);
       return visibleOnly;
     }
@@ -676,10 +766,15 @@
       }
     }
     if (all.length === 0) {
-      var visible = scan_visible_articles();
+      var visible = append_current_article(scan_visible_articles());
       if (visible.length > 0) {
-        onProgress(`历史列表读取失败，已改用当前页面可见文章：${visible.length} 篇`);
-        return append_current_article(visible);
+        visible.historyFailed = true;
+        visible.currentOnly = visible.length === 1 && visible[0].source === "current-page";
+        visible.partialError = apiError ? apiError.message || String(apiError) : "微信历史接口没有返回文章";
+        visible.pagesRead = pagesRead;
+        visible.completed = false;
+        onProgress(`历史读取失败，仍可处理当前页面的 ${visible.length} 篇文章`);
+        return visible;
       }
     }
     if (apiError && all.length === 0) throw apiError;
@@ -749,7 +844,8 @@
         <button class="primary" data-action="download" disabled>批量下载</button>
         <button data-action="records">打开下载目录</button>
       </div>
-      <div class="mp-batch-status" data-role="status">公众号已自动同步到新应用，无需点击这里。下方操作仅用于直接在当前网页读取和下载。</div>
+      <div class="mp-batch-connection" data-role="connection"></div>
+      <div class="mp-batch-status" data-role="status">可在当前网页读取文章；完整历史以实际读取结果为准。</div>
       <div class="mp-batch-list" data-role="list"></div>
     `;
     var state = { articles: [], currentTaskNames: [] };
@@ -779,7 +875,15 @@
         var maxPages = range === "all" ? 2000 : Number(range);
         state.articles = await fetch_mp_articles(acct, maxPages, setStatus);
         downloadBtn.disabled = state.articles.length === 0;
-        if (state.articles.partialError) {
+        if (state.articles.historyFailed) {
+          var scope = state.articles.currentOnly ? "仅当前文章" : "仅当前页面可见文章";
+          setStatus(`${scope} ${state.articles.length} 篇；历史读取失败：${state.articles.partialError}。历史尚未读完，可下载下面列出的文章。`);
+        } else if (state.articles.visibleOnly) {
+          setStatus(`仅显示当前页面可见的 ${state.articles.length} 篇文章；未读取公众号历史。`);
+        } else if (state.articles.scope === "author") {
+          var authorProgress = state.articles.hitLimit ? "所选页数已到上限" : "作者列表已到末页";
+          setStatus(`已保存作者文章 ${state.articles.length} 篇、${state.articles.pagesRead || 0} 页（${authorProgress}）；公众号完整历史尚未确认。`);
+        } else if (state.articles.partialError) {
           setStatus(`部分读取：${state.articles.length} 篇、${state.articles.pagesRead || 0} 页。${state.articles.partialError}，请刷新文章后重试。`);
         } else if (state.articles.hitLimit) {
           setStatus(`已读取：${state.articles.length} 篇、${state.articles.pagesRead || 0} 页（已到所选范围上限，后面还有文章）`);
@@ -821,6 +925,11 @@
       }
     };
     document.body.appendChild(panel);
+    if (is_article_path(location.pathname)) {
+      set_connection_state(mpConnection.state, mpConnection.message);
+    } else {
+      set_connection_state("offline", "当前页面未建立文章会话；网页内备用操作仍可使用。");
+    }
   }
   function insert_rss_button(acct) {
     if (!acct.biz || !acct.key) {
@@ -953,8 +1062,9 @@
         window.cgiData?.author_id ||
         window.cgiDataNew?.authorId ||
         window.cgiDataNew?.author_id ||
-        window.cgiDataNew?.user_name ||
         "",
+      candidate_author_id:
+        window.cgiDataNew?.user_name || "",
       cookie: document.cookie || "",
       cookie_expiration: Math.floor(Date.now() / 1000) + 24 * 60 * 60,
     };
@@ -966,8 +1076,134 @@
       refresh_uri: location.href,
     };
   }
+  // A one-shot diagnostic for the native WeChat profile-list bridge. It only
+  // reports return codes and counts; article data and session values stay in
+  // the WeChat page. The backend enables this explicitly for a local run.
+  async function probe_article_history_bridge(acct) {
+    if (!WXU.config.bridgeProbeEnabled || !acct.biz ||
+        acct.biz !== WXU.config.bridgeProbeTargetBiz ||
+        window.__mp_article_bridge_probe_started) return;
+    window.__mp_article_bridge_probe_started = true;
+    function report(status, extra) {
+      var data = Object.assign({ biz: acct.biz, status: status }, extra || {});
+      try {
+        Promise.resolve(WXU.request({
+          method: "POST",
+          url: get_api_origin() + "/api/desktop/bridge-probe",
+          body: data,
+        })).catch(function () {});
+      } catch (_) {}
+    }
+    function profile_user_name() {
+      return (window.cgiDataNew && window.cgiDataNew.user_name) ||
+        (window.cgiData && window.cgiData.user_name) || "";
+    }
+    var userName = profile_user_name();
+    if (!/^gh_[A-Za-z0-9]{6,}$/.test(userName)) {
+      // WeChat can fill cgiDataNew after the initial 1.5-second article hook.
+      // Give that page data time to arrive before recording a probe failure.
+      userName = await new Promise(function (resolve) {
+        var attempts = 0;
+        function check() {
+          var value = profile_user_name();
+          if (/^gh_[A-Za-z0-9]{6,}$/.test(value)) return resolve(value);
+          if (++attempts >= 20) return resolve("");
+          setTimeout(check, 300);
+        }
+        setTimeout(check, 300);
+      });
+    }
+    if (!/^gh_[A-Za-z0-9]{6,}$/.test(userName || "")) {
+      report("missing_username");
+      return;
+    }
+    var bridge = window.WeixinJSBridge;
+    if (!bridge) {
+      bridge = await new Promise(function (resolve) {
+        var timer = setTimeout(function () {
+          document.removeEventListener("WeixinJSBridgeReady", ready);
+          resolve(window.WeixinJSBridge || null);
+        }, 4000);
+        function ready() {
+          clearTimeout(timer);
+          resolve(window.WeixinJSBridge || null);
+        }
+        document.addEventListener("WeixinJSBridgeReady", ready, { once: true });
+      });
+    }
+    if (!bridge || typeof bridge.invoke !== "function") {
+      report("bridge_unavailable");
+      return;
+    }
+    var finished = false;
+    var timeout = setTimeout(function () { finish("timeout"); }, 12000);
+    function finish(status, extra) {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      report(status, extra);
+    }
+    try {
+      bridge.invoke("H5ExtTransfer", {
+        cgi_cmdid: 5814,
+        url: "/cgi-bin/mmbiz-bin/bizattr/bizprofilev2h5",
+        scope: "subscriptions",
+        webcgi_header: [],
+        cgi_type: 0,
+        webcgi_method: 1,
+        req_json: JSON.stringify({
+          BizUserName: userName,
+          ActionType: 0,
+          PageSize: 10,
+          BizSessionID: Math.floor(Date.now() / 1000),
+          Scene: 207,
+          UsePlainTopic: true,
+          PreLoad: 0,
+          FilterPicText: true,
+        }),
+      }, function (response) {
+        var baseRet = response && response.base_resp && response.base_resp.ret;
+        var jsapiRet = response && response.jsapi_resp && response.jsapi_resp.ret;
+        var codes = {
+          base_ret: Number.isInteger(baseRet) ? baseRet : null,
+          jsapi_ret: Number.isInteger(jsapiRet) ? jsapiRet : null,
+        };
+        var message = String((response && response.err_msg) || "");
+        if (/permission/i.test(message)) return finish("permission_denied", codes);
+        if (/not_implement|not found/i.test(message)) return finish("not_implemented", codes);
+        if ((Number.isInteger(baseRet) && baseRet !== 0) ||
+            (Number.isInteger(jsapiRet) && jsapiRet !== 0) ||
+            !message.includes("ok")) {
+          return finish("bridge_error", codes);
+        }
+        var body;
+        try {
+          body = JSON.parse(response.jsapi_resp.resp_json);
+        } catch (_) {
+          return finish("invalid_json", codes);
+        }
+        var serviceRet = body && body.BaseResp && body.BaseResp.Ret;
+        if (!Number.isInteger(serviceRet)) serviceRet = body && body.base_resp && body.base_resp.ret;
+        if (!Number.isInteger(serviceRet)) serviceRet = body && body.ret;
+        codes.service_ret = Number.isInteger(serviceRet) ? serviceRet : null;
+        var list = body && body.MsgList && body.MsgList.Msg;
+        var paging = body && body.MsgList && body.MsgList.PagingInfo;
+        codes.article_count = Array.isArray(list) ? list.length : 0;
+        codes.has_offset = !!(paging && paging.Offset);
+        codes.is_end = !!(paging && paging.IsEnd);
+        if (codes.service_ret !== null && codes.service_ret !== 0) {
+          return finish("service_error", codes);
+        }
+        finish(Array.isArray(list) ? "ok" : "unexpected_shape", codes);
+      });
+    } catch (_) {
+      finish("invoke_exception");
+    }
+  }
   async function main() {
-    if (location.pathname === "/s") {
+    if (is_article_path(location.pathname)) {
+      if (window.__mp_article_main_started) return;
+      window.__mp_article_main_started = true;
       var _OfficialAccountCredentials = build_article_credentials();
       // Account discovery belongs to opening the article itself. The legacy
       // batch panel may not find its preferred DOM anchor on every WeChat page,
@@ -978,9 +1214,7 @@
           var currentCredentials = build_article_credentials();
           insert_style();
           // insert_rss_button(_OfficialAccountCredentials);
-          connect(currentCredentials).catch(function (err) {
-            console.log("mp websocket connect failed", err);
-          });
+          connect(currentCredentials);
           render_batch_panel(currentCredentials);
           if (window.cgiDataNew) insert_download_button();
         }, 800);
@@ -990,6 +1224,8 @@
         insert_style();
         register_account(currentCredentials);
         render_batch_panel(currentCredentials);
+        connect(currentCredentials);
+        probe_article_history_bridge(currentCredentials);
       }, 1500);
       return;
     }
@@ -1012,9 +1248,12 @@
     if (WXU.config.officialServerDisabled || location.hostname !== "mp.weixin.qq.com") {
       return;
     }
-    var account = location.pathname === "/s" ? build_article_credentials() : build_page_account();
-    if (location.pathname === "/s") {
+    var account = is_article_path(location.pathname) ? build_article_credentials() : build_page_account();
+    if (is_article_path(location.pathname)) {
       register_account(account);
+      if (mpConnection.socket && mpConnection.socket.readyState === 1) {
+        sync_connected_account(account);
+      }
     }
     if (document.querySelector("#__mp_article_batch_panel__")) {
       return;

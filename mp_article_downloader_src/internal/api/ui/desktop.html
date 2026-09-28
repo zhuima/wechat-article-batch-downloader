@@ -1,0 +1,1614 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>公众号文章归档</title>
+  <style>
+    :root { font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif; font-size: 14px; color: #202b2a; background: #fff; --green: #32765e; --green-dark: #265f4b; --muted: #687471; --line: #e1e7e4; --soft: #f2f6f4; --warn: #945216; --red: #b13d37; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; overflow: hidden; }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .47; }
+    [hidden] { display: none !important; }
+    .app { display: flex; height: 100vh; overflow: hidden; }
+    .sidebar { width: 240px; flex: 0 0 240px; min-height: 0; padding: 16px 11px 16px; border-right: 1px solid var(--line); background: #fafbfa; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #c4d0ca transparent; transition: width .2s ease, flex-basis .2s ease; }
+    .brand { display: flex; gap: 8px; align-items: center; min-height: 36px; padding: 0 6px 5px; }
+    .brand-copy { flex: 1; min-width: 0; }
+    .brand strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 15px; letter-spacing: .01em; }
+    .brand small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 11px; }
+    .sidebar-toggle { flex: 0 0 30px; width: 30px; height: 30px; display: grid; place-items: center; padding: 5px; border: 0; border-radius: 7px; color: #596762; background: transparent; }
+    .sidebar-toggle:hover { color: var(--green-dark); background: #e9efec; }
+    .sidebar-toggle:focus-visible, .nav:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+    .sidebar-toggle svg { display: block; width: 18px; height: 18px; }
+    .nav-group { display: grid; gap: 3px; }
+    .nav { width: 100%; display: flex; align-items: center; gap: 10px; min-height: 37px; text-align: left; border: 0; background: transparent; color: #34443e; border-radius: 8px; padding: 8px 10px; }
+    .nav:hover { background: #eff2f0; }
+    .nav.active { color: #24372f; background: #e4e8e6; font-weight: 650; }
+    .nav-icon { flex: 0 0 20px; width: 20px; height: 20px; display: grid; place-items: center; }
+    .nav-icon svg { display: block; width: 18px; height: 18px; }
+    .nav-label { flex: 1; min-width: 0; white-space: nowrap; }
+    .nav-count { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+    .app.sidebar-collapsed .sidebar { width: 68px; flex-basis: 68px; padding-inline: 8px; }
+    .app.sidebar-collapsed .brand { justify-content: center; padding-inline: 0; }
+    .app.sidebar-collapsed .brand-copy, .app.sidebar-collapsed .nav-label, .app.sidebar-collapsed .nav-count, .app.sidebar-collapsed .sidebar-bottom { display: none; }
+    .app.sidebar-collapsed .nav { justify-content: center; padding-inline: 0; }
+    .catalog-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 17px; }
+    .catalog-search { flex: 1; min-width: 220px; max-width: 520px; height: 42px; border: 1px solid var(--line); border-radius: 9px; padding: 0 13px; background: #fff; outline-color: var(--green); }
+    .catalog-count { color: var(--muted); font-size: 13px; }
+    .catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px; }
+    .catalog-card { width: 100%; min-width: 0; min-height: 152px; display: flex; flex-direction: column; gap: 15px; text-align: left; color: inherit; padding: 19px 20px; border: 1px solid var(--line); border-radius: 13px; background: #fff; box-shadow: 0 2px 12px #273e2706; }
+    .catalog-card:hover { border-color: #8bb8ae; background: #f8fcfa; transform: translateY(-1px); }
+    .catalog-card:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+    .catalog-card-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .catalog-avatar { flex: 0 0 42px; width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: #dceee9; color: var(--green-dark); font-size: 18px; font-weight: 700; }
+    .catalog-card-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 700; }
+    .catalog-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .catalog-status { display: inline-block; padding: 3px 8px; border-radius: 100px; background: #f4eee5; color: #855518; font-size: 12px; font-weight: 600; }
+    .catalog-status.ready { background: #edf1f0; color: var(--muted); }
+    .catalog-card-foot { display: flex; justify-content: space-between; gap: 10px; margin-top: auto; padding-top: 12px; border-top: 1px solid #e8efed; color: var(--muted); font-size: 12px; }
+    .catalog-card-foot span:last-child { color: var(--green-dark); font-weight: 600; white-space: nowrap; }
+    .catalog-pager { margin-top: 16px; padding: 12px 0; border-top: 0; }
+    .detail-back { display: inline-flex; align-items: center; gap: 5px; padding: 0; margin: 0 0 9px; border: 0; background: transparent; color: var(--green); font-size: 13px; }
+    .detail-back:hover { text-decoration: underline; }
+    .sidebar-bottom { flex: 0 0 auto; margin-top: auto; padding: 12px 10px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+    .service-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; background: #a9b4aa; }
+    .service-dot.online { background: #2b995c; }
+    .main { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #b8cbc5 transparent; }
+    .topbar { height: 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 30px; border-bottom: 1px solid var(--line); background: #fff; }
+    .topbar-title { color: var(--muted); font-size: 13px; }
+    .topbar-right { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .notice { position: fixed; top: 72px; right: 22px; z-index: 100; width: max-content; max-width: min(440px, calc(100vw - 32px)); max-height: min(50vh, 360px); margin: 0; padding: 12px 12px 12px 14px; border: 1px solid #b6d8cc; border-left: 3px solid var(--green); border-radius: 10px; background: #f4fbf8; color: #164e43; box-shadow: 0 14px 36px #17372b29; display: flex; align-items: flex-start; gap: 10px; overflow-y: auto; font-size: 14px; line-height: 1.5; animation: notice-lifecycle 5s linear both; }
+    .notice::before { content: "✓"; flex: 0 0 20px; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: #d5ebe1; color: var(--green-dark); font-size: 12px; font-weight: 700; }
+    .notice.error { background: #fff7f5; border-color: #ecc7be; border-left-color: var(--red); color: #9d302b; }
+    .notice.error::before { content: "!"; background: #f8dcd6; color: var(--red); }
+    .notice-message { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+    .notice-close { flex: 0 0 20px; width: 20px; height: 20px; border: 0; border-radius: 5px; background: transparent; color: inherit; padding: 0; font-size: 16px; line-height: 1; }
+    .notice-close:hover { background: #17372b14; }
+    @keyframes notice-lifecycle { 0% { opacity: 0; transform: translate(12px, -6px); } 5%, 93% { opacity: 1; transform: translate(0, 0); } 100% { opacity: 0; transform: translate(12px, -6px); } }
+    @media (prefers-reduced-motion: reduce) { .notice { animation: none !important; } }
+    .view { width: 100%; margin: 0; padding: 30px clamp(22px, 3vw, 54px); }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { font-size: 25px; line-height: 1.3; margin-bottom: 7px; }
+    h2 { font-size: 17px; margin-bottom: 7px; }
+    h3 { font-size: 14px; margin-bottom: 4px; }
+    .subtext { color: var(--muted); line-height: 1.6; font-size: 14px; }
+    .eyebrow { color: var(--green); font-size: 12px; font-weight: 700; letter-spacing: .1em; margin-bottom: 12px; }
+    .hero { min-height: 188px; padding: 18px 0 23px; display: flex; align-items: center; justify-content: space-between; gap: 32px; border-bottom: 1px solid var(--line); background: #fff; }
+    .hero-copy { min-width: 0; }
+    .hero h1 { font-size: clamp(28px, 2.9vw, 36px); line-height: 1.3; letter-spacing: .015em; margin-bottom: 9px; }
+    .hero .subtext { max-width: 670px; margin-bottom: 0; font-size: 14px; }
+    .hero-art { flex: 0 0 clamp(108px, 14vw, 164px); width: clamp(108px, 14vw, 164px); color: #34785d; }
+    .hero-art svg { display: block; width: 100%; height: auto; }
+    .format-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; margin-top: 19px; color: var(--muted); font-size: 12px; }
+    .format-row span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .format-row svg { display: block; width: 14px; height: 14px; }
+    .import-card { margin-top: 18px; padding: 18px 21px; border-color: #dce8e0; background: #f9fbfa; box-shadow: none; }
+    .import-card h2 { margin-bottom: 5px; }
+    .import-card .subtext { margin-bottom: 13px; }
+    .import-form { display: flex; gap: 9px; align-items: stretch; }
+    .import-form input { flex: 1; min-width: 0; min-height: 40px; border: 1px solid #cbd9ce; border-radius: 8px; padding: 8px 11px; outline-color: var(--green); }
+    .import-form .button { min-height: 40px; }
+    .import-message { min-height: 17px; margin: 9px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .import-message.error { color: var(--red); }
+    .import-quick { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+    .import-quick span { flex: 1; min-width: 180px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .single-article { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 17px 20px; margin-bottom: 16px; border-color: #badcc2; }
+    .single-article > div { flex: 1; min-width: 220px; }
+    .single-article h2 { margin-bottom: 4px; overflow-wrap: anywhere; }
+    .single-article .subtext { margin-bottom: 0; }
+    .pill-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 22px; }
+    .pill { border: 1px solid #cddfd9; border-radius: 100px; background: #fff; padding: 6px 10px; color: #405c55; font-size: 12px; }
+    .steps { display: grid; gap: 17px; margin: 24px 0 22px; }
+    .step { display: grid; grid-template-columns: 36px minmax(0, 1fr); column-gap: 14px; row-gap: 2px; align-items: start; background: #fff; }
+    .step-number { grid-row: 1 / span 2; width: 36px; height: 36px; display: grid; place-items: center; background: #edf3f0; color: var(--green); border-radius: 50%; font-size: 15px; font-weight: 700; }
+    .step h3 { grid-column: 2; margin: 0; padding-top: 1px; font-size: 14px; }
+    .step p { grid-column: 2; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .section-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 20px; }
+    .section-header .subtext { margin-bottom: 0; }
+    .account-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+    .account-heading { min-width: 0; }
+    .button-row.account-actions { flex-wrap: nowrap; justify-content: flex-end; }
+    .account-actions .button { padding-inline: 10px; }
+    .button-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .button { border: 1px solid var(--line); background: #fff; color: #24403c; border-radius: 8px; min-height: 36px; padding: 7px 12px; line-height: 1.35; white-space: nowrap; }
+    .button:hover:not(:disabled) { border-color: #8bb8ae; background: #f3f9f7; }
+    .button.primary { background: var(--green); border-color: var(--green); color: #fff; }
+    .button.primary:hover:not(:disabled) { background: var(--green-dark); }
+    .button.subtle { background: transparent; }
+    .button.small { padding: 5px 9px; min-height: 30px; font-size: 13px; }
+    .button.warn { color: var(--warn); }
+    .card { background: #fff; border: 1px solid var(--line); border-radius: 13px; box-shadow: 0 2px 12px #273e2706; }
+    .scan-card { padding: 19px 21px; }
+    .source-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .source-tab { border: 1px solid var(--line); border-radius: 8px; background: #f5f8f7; color: var(--muted); padding: 8px 14px; font: inherit; cursor: pointer; }
+    .source-tab.active { border-color: var(--green-dark); background: #e6f2ed; color: var(--green-dark); font-weight: 600; }
+    .weread-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+    .weread-actions p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .scan-row { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 12px; }
+    .field { display: grid; gap: 5px; color: var(--muted); font-size: 12px; font-weight: 600; }
+    .field input, .field select, .toolbar input, .toolbar select { min-height: 36px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; background: white; color: #172b2a; outline-color: var(--green); }
+    .field select { min-width: 132px; }
+    .field input[type=number] { width: 92px; }
+    .field input[type=date] { width: 150px; }
+    .scan-actions { margin-left: auto; align-self: end; }
+    .scan-state { display: flex; gap: 8px; align-items: flex-start; margin-top: 16px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .scan-state.error { color: var(--red); }
+    .scan-state.running { color: var(--green-dark); }
+    .state-icon { font-size: 15px; line-height: 1.2; }
+    .results { margin-top: 17px; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 15px; border-bottom: 1px solid var(--line); }
+    .toolbar input[type=search] { width: min(280px, 100%); }
+    .toolbar-spacer { flex: 1; }
+    .count { color: var(--muted); font-size: 13px; white-space: nowrap; }
+    .article-row { display: flex; gap: 13px; align-items: flex-start; padding: 14px 16px; border-bottom: 1px solid #e7eeec; }
+    .article-row:last-child { border-bottom: 0; }
+    .article-row:hover { background: #f5faf8; }
+    .article-row input[type=checkbox] { accent-color: var(--green); margin: 4px 0 0; width: 16px; height: 16px; flex: 0 0 16px; }
+    .article-main { flex: 1; min-width: 0; }
+    .article-title { display: block; font-size: 15px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+    .article-title-button { width: 100%; border: 0; padding: 0; background: none; color: #153a36; text-align: left; cursor: pointer; }
+    .article-title-button:hover { color: var(--green); text-decoration: underline; }
+    .article-title-button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 2px; }
+    .article-local-status { display: inline-block; width: max-content; margin-top: 5px; border-radius: 20px; padding: 2px 8px; background: #edf1f0; color: var(--muted); font-size: 12px; }
+    .article-local-status.downloaded { background: #d9eee8; color: var(--green-dark); }
+    .article-digest { display: block; color: var(--muted); font-size: 13px; line-height: 1.5; margin-top: 3px; overflow-wrap: anywhere; }
+    .article-date { flex: 0 0 auto; color: var(--muted); font-size: 12px; white-space: nowrap; margin-top: 4px; }
+    .empty { padding: 48px 22px; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.7; }
+    .empty strong { display: block; color: #3a4a3f; font-size: 15px; margin-bottom: 5px; }
+    .pagination { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 15px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    .download-bar { position: sticky; top: 0; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 17px; padding: 16px 18px; border-radius: 0; background: #fff; box-shadow: 0 8px 24px #273e2714; }
+    .mode-group { display: grid; gap: 4px; min-width: 220px; }
+    .mode-group label { color: var(--muted); font-size: 12px; font-weight: 600; }
+    .mode-group select { width: 120px; min-height: 32px; border: 1px solid var(--line); border-radius: 7px; background: white; padding: 5px 8px; }
+    .mode-hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .download-actions { margin-left: auto; }
+    .queue-state { color: var(--muted); font-size: 13px; line-height: 1.5; width: 100%; }
+    .queue-state.error { color: var(--red); }
+    .local-status-card { display: flex; align-items: center; gap: 16px; padding: 16px 20px; margin-bottom: 16px; background: #f8faf9; }
+    .local-status-card.complete { border-color: #a8d2c6; background: #e9f6f1; }
+    .local-status-mark { flex: 0 0 35px; width: 35px; height: 35px; border-radius: 50%; display: grid; place-items: center; background: #dfeae7; color: #506b64; font-size: 19px; }
+    .local-status-card.complete .local-status-mark { background: #c8e9df; color: var(--green-dark); }
+    .local-status-copy { flex: 1; min-width: 0; }
+    .local-status-copy strong { display: block; font-size: 14px; line-height: 1.5; }
+    .local-status-copy span { display: block; color: var(--muted); font-size: 13px; line-height: 1.5; margin-top: 2px; }
+    .local-library { margin-bottom: 16px; overflow: hidden; }
+    .local-library-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 15px 18px; border-bottom: 1px solid var(--line); }
+    .local-library-heading > div { flex: 1; min-width: 220px; }
+    .local-library-heading h2 { margin: 0 0 3px; }
+    .local-library-heading p { margin: 0; color: var(--muted); font-size: 13px; }
+    .local-library-heading input { width: min(280px, 100%); min-height: 36px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; outline-color: var(--green); }
+    .summary-list { display: grid; gap: 10px; }
+    .summary-card { display: flex; gap: 16px; align-items: flex-start; padding: 16px 18px; }
+    .folder-icon { flex: 0 0 38px; width: 38px; height: 38px; border-radius: 10px; background: #e6f1e5; color: var(--green); display: grid; place-items: center; font-size: 20px; }
+    .summary-body { flex: 1; min-width: 0; }
+    .summary-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 15px; font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }
+    .summary-account { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 3px; overflow-wrap: anywhere; }
+    .summary-meta { display: flex; flex-wrap: wrap; gap: 5px 10px; color: var(--muted); font-size: 11px; line-height: 1.5; margin-top: 5px; }
+    .summary-meta .failure { color: var(--red); }
+    .progress-track { height: 6px; border-radius: 20px; background: #e9eee8; overflow: hidden; margin-top: 11px; max-width: 620px; }
+    .progress-fill { height: 100%; background: var(--green); border-radius: inherit; }
+    .summary-card .button { align-self: center; }
+    .tasks-section { margin-top: 4px; }
+    .batch-section { margin-top: 28px; }
+    .tasks-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 11px; }
+    .tasks-head h2 { margin: 0; }
+    .task-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 13px 16px; border-bottom: 1px solid #edf0eb; }
+    .task-row:last-child { border-bottom: 0; }
+    .task-main { flex: 1 1 280px; min-width: 0; }
+    .task-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: #26362b; font-size: 15px; font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }
+    .task-title-button { width: 100%; border: 0; padding: 0; background: transparent; text-align: left; cursor: pointer; }
+    .task-title-button:hover { color: var(--green); text-decoration: underline; }
+    .task-title-button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: 2px; }
+    .task-account { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 3px; overflow-wrap: anywhere; }
+    .task-status { min-width: 72px; color: var(--muted); font-size: 11px; }
+    .task-status.error { color: var(--red); }
+    .task-error { color: var(--red); font-size: 11px; line-height: 1.5; margin-top: 4px; overflow-wrap: anywhere; }
+    .task-actions { display: flex; gap: 5px; }
+    .footer-note { color: var(--muted); font-size: 12px; line-height: 1.6; margin-top: 14px; }
+    .main.reading { overflow: hidden; }
+    .reader-view { height: calc(100vh - 56px); display: flex; flex-direction: column; }
+    .reader-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 18px; }
+    .reader-toolbar .reader-spacer { flex: 1; }
+    .reader-source { color: var(--muted); font-size: 13px; }
+    .reader-heading { margin-bottom: 18px; }
+    .reader-heading h1 { font-size: 24px; line-height: 1.4; overflow-wrap: anywhere; }
+    .reader-heading p { margin: 0; color: var(--muted); font-size: 13px; }
+    .reader-card { flex: 1; min-height: 0; overflow: hidden; }
+    .reader-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+    @media (min-width: 1550px) { .hero-art { margin-right: 4vw; } .hero h1 { font-size: 38px; } }
+    @media (max-width: 1100px) { .account-header { grid-template-columns: 1fr; gap: 12px; } .button-row.account-actions { justify-content: flex-start; } }
+    @media (max-width: 820px) { .sidebar { width: 214px; flex-basis: 214px; } .view { padding: 22px; } .topbar { padding: 0 22px; } .scan-actions { margin-left: 0; width: 100%; } .hero-art { flex-basis: 112px; width: 112px; } }
+    @media (max-width: 600px) { body { overflow: auto; } .app { display: block; height: auto; min-height: 100vh; overflow: visible; } .sidebar, .app.sidebar-collapsed .sidebar { width: 100%; min-height: auto; overflow: visible; border-right: 0; border-bottom: 1px solid var(--line); padding: 9px 12px; gap: 7px; } .brand { min-height: 30px; padding-bottom: 0; } .nav-group { display: flex; flex-wrap: wrap; } .nav { width: auto; min-height: 33px; padding: 6px 9px; } .app.sidebar-collapsed .nav { padding-inline: 9px; } .sidebar-bottom { display: none; } .main, .main.reading { overflow: visible; } .topbar { height: 48px; } .view { padding: 17px; } .hero { min-height: 0; gap: 14px; padding: 10px 0 18px; } .hero h1 { font-size: 27px; } .hero-art { flex-basis: 70px; width: 70px; } .format-row { gap: 7px 12px; } .catalog-grid { grid-template-columns: 1fr; } .catalog-card { min-height: 138px; } .catalog-pager { flex-wrap: wrap; } .reader-view { height: auto; } .reader-frame { height: 65vh; min-height: 380px; } .import-form { flex-direction: column; } .section-header { flex-wrap: wrap; } .summary-card { flex-wrap: wrap; } .summary-card .button { margin-left: 54px; } .download-bar { position: static; } .article-date { display: none; } }
+    @media (max-width: 430px) { .hero-art { display: none; } .hero h1 { font-size: 25px; } .format-row span { white-space: normal; } }
+    @media (max-width: 600px) { .nav-group { flex-wrap: nowrap; overflow-x: auto; } .nav-group .nav { flex: 0 0 auto; width: auto; white-space: nowrap; } .catalog-card-foot { flex-wrap: wrap; } }
+  </style>
+</head>
+<body>
+  <div class="app" id="appShell">
+    <aside class="sidebar" aria-label="导航">
+      <div class="brand"><div class="brand-copy"><strong>公众号文章归档</strong><small>本地保存 · 随时阅读</small></div><button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="收起侧边栏" aria-expanded="true" title="收起侧边栏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M9 4v16"></path></svg></button></div>
+      <div class="nav-group">
+        <button class="nav active" id="welcomeNav" type="button" aria-label="开始归档" title="开始归档"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V6a2 2 0 0 1 2-2h5v15H6a2 2 0 0 0-2 2"></path><path d="M20 19V6a2 2 0 0 0-2-2h-5v15h5a2 2 0 0 1 2 2"></path><path d="M11 4v15m2-15v15"></path></svg></span><span class="nav-label">开始归档</span></button>
+        <button class="nav" id="accountsNav" type="button" aria-label="公众号列表" title="公众号列表"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></svg></span><span class="nav-label">公众号列表</span><span class="nav-count" id="sidebarAccountCount">0</span></button>
+        <button class="nav" id="downloadsNav" type="button" aria-label="下载中心" title="下载中心"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v8m-3-3 3 3 3-3M8 18h8"></path></svg></span><span class="nav-label">下载中心</span></button>
+      </div>
+      <div class="sidebar-bottom"><div><span class="service-dot" id="serviceDot"></span><span id="serviceText">连接本地服务中</span></div><div id="downloadPath"></div></div>
+    </aside>
+    <main class="main" id="mainPane">
+      <div class="topbar"><span class="topbar-title" id="crumb">开始归档</span><span class="topbar-right">Windows · 本地文章库</span></div>
+      <div class="notice" id="notice" role="status" aria-live="polite" hidden><span class="notice-message" id="noticeMessage"></span><button class="notice-close" id="noticeClose" type="button" aria-label="关闭提示">×</button></div>
+
+      <section class="view" id="welcomeView">
+        <div class="hero"><div class="hero-copy"><h1>把值得留下的文章，<br>收进自己的书架。</h1><p class="subtext">公众号历史文章 · 本地保存 · 随时阅读</p><div class="format-row" aria-label="支持的保存格式"><span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M4 1.5h5l3 3V14H4zM9 1.5V5h3"></path></svg>Markdown</span><span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M2 3h12M2 6h9M2 9h12M2 12h8"></path></svg>纯文本</span><span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="1.5" y="2" width="13" height="12" rx="1.5"></rect><path d="M3 11l3-3 2 2 2-2 3 3"></path></svg>HTML 与图片</span><span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M6 2C4 2 4 3 4 5v1c0 1-.5 2-2 2 1.5 0 2 1 2 2v1c0 2 0 3 2 3m4-12c2 0 2 1 2 3v1c0 1 .5 2 2 2-1.5 0-2 1-2 2v1c0 2 0 3-2 3"></path></svg>JSONL 资料</span></div></div><div class="hero-art" aria-hidden="true"><svg viewBox="0 0 160 130" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="19" y="30" width="27" height="84" rx="4" fill="currentColor"/><rect x="53" y="45" width="27" height="69" rx="4" fill="currentColor"/><path d="M99 22a4 4 0 0 1 4-4h19a4 4 0 0 1 4 4v92H99V22Z" fill="currentColor"/><path d="M131 31a4 4 0 0 1 4-4h12a4 4 0 0 1 4 4l9 83h-25l-4-83Z" fill="currentColor"/><path d="M60 62h13M60 89h13M106 58h13" stroke="white" stroke-width="4" stroke-linecap="round"/><path d="M23 113h131" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg></div></div>
+        <div class="card import-card"><h2>粘贴微信文章链接</h2><p class="subtext">从电脑微信中复制文章链接。普通分享链接可下载这一篇；若链接包含有效的微信会话凭证，还可尝试读取历史。</p><form class="import-form" id="importForm" novalidate><input id="importUrl" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://mp.weixin.qq.com/s/文章短码" aria-label="微信文章链接"><button class="button primary" id="importButton" type="submit">导入文章</button></form><p class="import-message" id="importMessage" role="status" aria-live="polite">链接仅提交给本机服务，用于读取微信文章。</p><div class="import-quick" id="importQuick" hidden><span id="importQuickTitle"></span><button class="button primary" id="welcomeDownloadImported" type="button">下载这篇文章</button></div></div>
+        <div class="steps"><div class="step"><div class="step-number">1</div><h3>打开一篇公众号文章</h3><p>在电脑微信中打开目标公众号的一篇文章，再复制文章链接。</p></div><div class="step"><div class="step-number">2</div><h3>导入链接，保存文章</h3><p>将完整链接粘贴到上方输入框。导入后可立即下载这一篇。</p></div><div class="step"><div class="step-number">3</div><h3>选择范围，继续归档</h3><p>若微信返回历史列表，可批量读取和下载，并支持暂停后继续。</p></div></div>
+        <div class="button-row"><button class="button" id="welcomeFirstAccount" type="button" hidden>查看公众号列表</button><button class="button" id="welcomeRefresh" type="button">刷新公众号列表</button><button class="button" id="welcomeOpenRoot" type="button">打开下载根目录</button></div>
+        <p class="footer-note" id="welcomeHint">正在读取本地公众号列表…</p>
+        <p class="footer-note">原有代理自动识别仍可使用；如果打开文章后没有自动出现，直接使用上方链接导入。</p>
+      </section>
+
+      <section class="view" id="accountsView" hidden>
+        <div class="section-header"><div><div class="eyebrow">本地文章库</div><h1>公众号列表</h1><p class="subtext">按公众号查找已导入的内容，打开卡片查看历史文章和本地文档。</p></div><div class="button-row"><button class="button primary" id="catalogImportLink" type="button">导入文章链接</button><button class="button" id="catalogRefresh" type="button">刷新列表</button></div></div>
+        <div class="catalog-tools"><input class="catalog-search" id="catalogSearch" type="search" placeholder="搜索公众号名称" aria-label="搜索公众号名称或标识"><span class="catalog-count" id="catalogCount">正在读取公众号…</span></div>
+        <div class="catalog-grid" id="catalogList"></div>
+        <div class="pagination catalog-pager" id="catalogPager" hidden><span id="catalogPageText"></span><div class="button-row"><button class="button small" id="catalogPrev" type="button">上一页</button><button class="button small" id="catalogNext" type="button">下一页</button></div></div>
+      </section>
+
+      <section class="view" id="accountView" hidden>
+        <div class="section-header account-header"><div class="account-heading"><button class="detail-back" id="accountBack" type="button">← 返回公众号列表</button><h1 id="accountTitle">公众号</h1><p class="subtext" id="accountDetail">选择范围，读取公众号历史文章</p></div><div class="button-row account-actions"><button class="button primary" id="accountImportLink" type="button">导入新链接</button><button class="button" id="accountOpenDir" type="button">打开目录</button><button class="button" id="accountRefresh" type="button">刷新</button></div></div>
+        <div class="card local-status-card" id="localStatusCard" role="status" aria-live="polite"><span class="local-status-mark" id="localStatusMark" aria-hidden="true">⌕</span><div class="local-status-copy"><strong id="localStatusTitle">正在核对本地文件…</strong><span id="localStatusDetail">下载状态会按磁盘上的 HTML、Markdown 和纯文本文件核对。</span></div><button class="button small" id="localStatusOpenDir" type="button">打开文件夹</button></div>
+        <div class="card local-library" id="localLibraryCard" hidden><div class="local-library-heading"><div><h2 id="localLibraryTitle">本地文档</h2><p>这些文章已保存在本机，可直接阅读 Markdown。</p></div><input id="localLibrarySearch" type="search" placeholder="搜索本地文档" aria-label="搜索本地文档"></div><div id="localLibraryList"></div><div class="pagination" id="localLibraryPager" hidden><span id="localLibraryPageText"></span><div class="button-row"><button class="button small" id="localLibraryPrev" type="button">上一页</button><button class="button small" id="localLibraryNext" type="button">下一页</button></div></div></div>
+        <div class="card single-article" id="importedArticleCard" hidden><div><div class="eyebrow">刚导入的文章</div><h2 id="importedArticleTitle">公众号文章</h2><p class="subtext" id="importedArticleHint">可直接下载这一篇。批量读取历史取决于微信是否返回文章列表。</p></div><button class="button primary" id="downloadImported" type="button">下载这篇文章</button></div>
+        <div class="card scan-card">
+          <div class="source-tabs" role="group" aria-label="文章列表来源"><button class="source-tab active" id="sourceWechat" type="button" aria-pressed="true">电脑微信历史</button><button class="source-tab" id="sourceWeread" type="button" aria-pressed="false">微信读书收录</button></div>
+          <div class="scan-row" id="legacyScanControls"><label class="field">读取范围<select id="scanMode"><option value="recent">最近文章</option><option value="all" selected>尝试全部历史</option><option value="date">日期范围</option></select></label><label class="field" id="limitField" hidden>篇数<input id="scanLimit" type="number" min="1" max="10000" step="1" value="20"></label><label class="field" id="afterField" hidden>从<input id="scanAfter" type="date"></label><label class="field" id="beforeField" hidden>至<input id="scanBefore" type="date"></label><div class="button-row scan-actions"><button class="button warn" id="scanPause" type="button" hidden>暂停读取</button><button class="button" id="scanRestart" type="button" hidden>重新读取</button><button class="button primary" id="scanResume" type="button" hidden>继续读取</button><button class="button primary" id="scanStart" type="button">读取文章</button></div></div>
+          <div class="weread-actions" id="wereadActions" hidden><button class="button primary" id="wereadStart" type="button">开始读取微信读书收录</button><p>使用微信读书官方阅读器；手机扫码后可从已保存的进度继续。收录范围可能不完整。</p></div>
+          <div class="scan-state" id="scanState"><span class="state-icon" id="scanStateIcon" aria-hidden="true">ℹ</span><span id="scanStateText">选择范围后读取文章</span></div>
+          <p class="footer-note">历史读取依赖微信返回的列表；作者文章列表可能只覆盖部分文章。若读取暂停或结果为 0，可直接下载刚导入的文章。</p>
+        </div>
+        <div class="card download-bar"><div class="mode-group"><label for="downloadMode">下载速度</label><select id="downloadMode"><option value="safe">安全模式</option><option value="fast">快速模式</option></select><span class="mode-hint" id="modeHint">每秒最多 1 篇，适合长时间、大批量归档。</span></div><span class="count" id="selectionCount">未选择文章</span><div class="button-row download-actions"><button class="button" id="queueStop" type="button" hidden>停止添加</button><button class="button" id="queueSelected" type="button" disabled>下载所选</button><button class="button primary" id="queueAll" type="button" disabled>下载全部</button></div><div class="queue-state" id="queueState" role="status" aria-live="polite">先检查最近和最早的文章，再按实际下载结果逐批添加。</div></div>
+        <div class="card results">
+          <div class="toolbar"><input id="articleSearch" type="search" placeholder="搜索标题或摘要" aria-label="搜索文章标题或摘要"><span class="count" id="articleCount">0 篇</span><span class="toolbar-spacer"></span><button class="button small" id="selectFiltered" type="button">选择搜索结果</button><button class="button small" id="clearSelection" type="button">清除选择</button></div>
+          <div id="articleList"><div class="empty"><strong>文章会出现在这里</strong>导入公众号后，选择范围并点击“读取文章”。</div></div>
+          <div class="pagination" id="articlePager" hidden><span id="articlePageText"></span><div class="button-row"><button class="button small" id="articlePrev" type="button">上一页</button><button class="button small" id="articleNext" type="button">下一页</button></div></div>
+        </div>
+      </section>
+
+      <section class="view reader-view" id="readerView" hidden>
+        <div class="reader-toolbar"><button class="button" id="readerBack" type="button">← 返回文章列表</button><span class="reader-source">本地 Markdown 阅读</span><span class="reader-spacer"></span><button class="button" id="readerCopyLink" type="button" disabled title="本地文档未保存原始文章链接">原文链接不可用</button><button class="button" id="readerOpenDir" type="button">打开文件夹</button></div>
+        <div class="reader-heading"><h1 id="readerTitle">文章</h1><p id="readerMeta">保存在本机的 Markdown 文档</p></div>
+        <div class="card reader-card"><iframe class="reader-frame" id="readerFrame" title="本地文章阅读" sandbox="allow-popups allow-same-origin" referrerpolicy="no-referrer"></iframe></div>
+      </section>
+
+      <section class="view" id="downloadsView" hidden>
+        <div class="section-header"><div><h1>下载中心</h1><p class="subtext">逐篇查看文章标题、公众号和下载状态；批次进度显示在下方。</p></div><div class="button-row"><button class="button" id="downloadsOpenRoot" type="button">打开下载根目录</button><button class="button" id="downloadsRefresh" type="button">刷新</button></div></div>
+        <div class="tasks-section"><div class="tasks-head"><h2>文章任务</h2><div class="button-row"><label class="field" for="taskFilter">状态<select id="taskFilter"><option value="all">全部</option><option value="running">下载中</option><option value="wait">排队中</option><option value="ready">准备中</option><option value="pause">已暂停</option><option value="error">失败</option><option value="done">已完成</option></select></label></div></div><div class="card"><div id="taskList"><div class="empty">还没有文章任务。</div></div><div class="pagination" id="taskPager" hidden><span id="taskPageText"></span><div class="button-row"><button class="button small" id="taskPrev" type="button">上一页</button><button class="button small" id="taskNext" type="button">下一页</button></div></div></div><p class="footer-note">已完成任务的文件保存在对应公众号目录。失败原因可在任务下方查看。</p></div>
+        <div class="batch-section"><div class="tasks-head"><h2>批次概览</h2></div><div id="summaryList" class="summary-list"><div class="card empty"><strong>还没有下载批次</strong>下载公众号文章后，批次进度会显示在这里。</div></div></div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    "use strict";
+    (() => {
+      const $ = (id) => document.getElementById(id);
+      const ui = {};
+      for (const id of ["appShell","sidebarToggle","mainPane","welcomeNav","downloadsNav","serviceDot","serviceText","downloadPath","crumb","notice","noticeMessage","noticeClose","welcomeView","welcomeFirstAccount","welcomeRefresh","welcomeOpenRoot","welcomeHint","importForm","importUrl","importButton","importMessage","importQuick","importQuickTitle","welcomeDownloadImported","accountView","accountTitle","accountDetail","accountImportLink","accountOpenDir","accountRefresh","localStatusCard","localStatusMark","localStatusTitle","localStatusDetail","localStatusOpenDir","importedArticleCard","importedArticleTitle","downloadImported","sourceWechat","sourceWeread","legacyScanControls","wereadActions","wereadStart","scanMode","limitField","scanLimit","afterField","scanAfter","beforeField","scanBefore","scanPause","scanRestart","scanResume","scanStart","scanState","scanStateIcon","scanStateText","articleSearch","articleCount","selectFiltered","clearSelection","articleList","articlePager","articlePageText","articlePrev","articleNext","downloadMode","modeHint","selectionCount","queueStop","queueSelected","queueAll","queueState","readerView","readerBack","readerTitle","readerMeta","readerFrame","readerCopyLink","readerOpenDir","downloadsView","downloadsOpenRoot","downloadsRefresh","summaryList","taskFilter","taskList","taskPager","taskPageText","taskPrev","taskNext"]) ui[id] = $(id);
+      for (const id of ["accountsNav","sidebarAccountCount","accountsView","catalogImportLink","catalogRefresh","catalogSearch","catalogCount","catalogList","catalogPager","catalogPageText","catalogPrev","catalogNext","accountBack"]) ui[id] = $(id);
+      for (const id of ["localLibraryCard","localLibraryTitle","localLibrarySearch","localLibraryList","localLibraryPager","localLibraryPageText","localLibraryPrev","localLibraryNext","importedArticleHint"]) ui[id] = $(id);
+
+      const ARTICLE_PAGE_SIZE = 100;
+      const CATALOG_PAGE_SIZE = 24;
+      const LOCAL_LIBRARY_PAGE_SIZE = 50;
+      const TASK_PAGE_SIZE = 50;
+      const state = {
+        accounts: [], accountFingerprint: "", scanSummaries: new Map(), selected: "welcome", catalogPage: 1, catalogScroll: 0, scan: emptyScan(), scanOptionsLoaded: false, scanSource: readScanSource(),
+        selectedIds: new Set(), articlePage: 1, scanBusy: false, queueBusy: false, cancelQueue: false, importBusy: false, directDownloadBusy: false,
+        accountBusy: false, scanRequest: 0, localStatusRequest: 0, localLibraryRequest: 0, importedStatusRequest: 0, downloadRequest: 0, taskRequest: 0, scanPolling: false, localStatusPolling: false, downloadPolling: false,
+        summaries: [], tasks: [], taskTotal: 0, taskPage: 1, taskDataPage: 0, taskDataFilter: "all",
+        online: false, downloadDir: "", mode: readMode(), lastScanKey: "", importedArticle: null, localStatus: null, localLibrary: [], localLibraryPage: 1, localLibraryState: "idle",
+        readerArticle: null, readerRequest: 0, readerReturnScroll: 0, readerReturnView: "", readerLink: "", readerDocumentVersion: 0, noticeEpoch: 0,
+        sidebarCollapsed: readSidebarCollapsed()
+      };
+      const downloadScanCache = new Map(), downloadScanRequests = new Map();
+      const readerCopyTimers = new Map();
+
+      function emptyScan() { return { status: "idle", message: "选择范围后读取文章", articles: [], pages: 0, updated: 0, options: null }; }
+      function readMode() { try { return localStorage.getItem("mpArchiveDownloadMode") === "fast" ? "fast" : "safe"; } catch (_) { return "safe"; } }
+      function readScanSource() { try { return localStorage.getItem("mpArchiveScanSource") === "weread" ? "weread" : "wechat"; } catch (_) { return "wechat"; } }
+      function saveMode(mode) { try { localStorage.setItem("mpArchiveDownloadMode", mode); } catch (_) {} }
+      function readSidebarCollapsed() { try { return localStorage.getItem("mpArchiveSidebarCollapsed") === "1"; } catch (_) { return false; } }
+      function renderSidebar() {
+        ui.appShell.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
+        ui.sidebarToggle.setAttribute("aria-expanded", String(!state.sidebarCollapsed));
+        const label = state.sidebarCollapsed ? "展开侧边栏" : "收起侧边栏";
+        ui.sidebarToggle.setAttribute("aria-label", label);
+        ui.sidebarToggle.title = label;
+      }
+      function toggleSidebar() {
+        state.sidebarCollapsed = !state.sidebarCollapsed;
+        try { localStorage.setItem("mpArchiveSidebarCollapsed", state.sidebarCollapsed ? "1" : "0"); } catch (_) {}
+        renderSidebar();
+      }
+      function node(tag, className, value) { const result = document.createElement(tag); if (className) result.className = className; if (value !== undefined) result.textContent = String(value); return result; }
+      function displayArticleTitle(value) {
+        const entities = { amp: "&", quot: '"', apos: "'", lt: "<", gt: ">", nbsp: " ", hellip: "…", middot: "·", mdash: "—", ndash: "–", lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”" };
+        let title = String(value || "");
+        for (let pass = 0; pass < 2; pass++) {
+          const decoded = title.replace(/&(#(?:x[0-9a-f]+|[0-9]+)|[a-z][a-z0-9]+);/gi, (match, entity) => {
+            if (entity[0] !== "#") return entities[entity.toLowerCase()] ?? match;
+            const hex = entity[1].toLowerCase() === "x", codePoint = parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10);
+            return codePoint > 0 && codePoint <= 0x10ffff && !(codePoint >= 0xd800 && codePoint <= 0xdfff) ? String.fromCodePoint(codePoint) : "�";
+          });
+          if (decoded === title) break;
+          title = decoded;
+        }
+        return title;
+      }
+      function clear(node) { node.replaceChildren(); }
+      function mainScrollTop() { return window.innerWidth <= 600 ? Number(window.scrollY || document.documentElement.scrollTop || 0) : ui.mainPane.scrollTop; }
+      function scrollMainTo(top) { if (window.innerWidth <= 600 && typeof window.scrollTo === "function") window.scrollTo(0, top); else ui.mainPane.scrollTop = top; }
+      let noticeTimer = null;
+      function clearNotice() { if (noticeTimer !== null) clearTimeout(noticeTimer); noticeTimer = null; ui.notice.hidden = true; }
+      function leaveNoticeScope() { state.noticeEpoch++; clearNotice(); }
+      function showNotice(message, isError = false, expectedEpoch = state.noticeEpoch) {
+        if (expectedEpoch !== state.noticeEpoch) return;
+        clearNotice();
+        ui.noticeMessage.textContent = message;
+        ui.notice.classList.toggle("error", isError);
+        const duration = isError ? 8000 : 5000;
+        ui.notice.style.animationName = "none";
+        ui.notice.style.animationDuration = duration + "ms";
+        ui.notice.hidden = false;
+        void ui.notice.offsetWidth;
+        ui.notice.style.animationName = "notice-lifecycle";
+        noticeTimer = setTimeout(clearNotice, duration);
+      }
+      function updateOnline(value) { state.online = value; ui.serviceDot.classList.toggle("online", value); ui.serviceText.textContent = value ? "本地服务已连接" : "本地服务未连接"; }
+      function redactURLs(value) { return String(value || "").replace(/https?:\/\/[^\s"'<>]+/gi, "[文章链接]").replace(/((?:key|pass_ticket|uin|appmsg_token|token)=)[^&\s"'<>]+/gi, "$1[已隐藏]"); }
+      function errorText(error) { return redactURLs(error instanceof Error ? error.message : String(error || "操作失败")); }
+      function safeTitle(value) { return redactURLs(String(value || "").trim()) || "公众号文章"; }
+      async function api(path, body, options = {}) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), options.timeout || 35000);
+        try {
+          const response = await fetch(path, {
+            method: body === undefined ? "GET" : "POST",
+            headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+            body: body === undefined ? undefined : JSON.stringify(body),
+            credentials: "same-origin", cache: "no-store", signal: controller.signal
+          });
+          if (!response.ok) throw new Error("本地服务响应异常（HTTP " + response.status + "）");
+          let envelope;
+          try { envelope = await response.json(); } catch (_) { throw new Error("本地服务返回了无法解析的数据"); }
+          if (!envelope || typeof envelope.code !== "number") throw new Error("本地服务响应格式错误");
+          if (envelope.code !== 0) {
+            const error = new Error(envelope.msg || "操作失败（错误码 " + envelope.code + "）");
+            error.code = envelope.code;
+            throw error;
+          }
+          if (options.expectData !== false && !Object.prototype.hasOwnProperty.call(envelope, "data")) throw new Error("本地服务未返回数据");
+          updateOnline(true);
+          return envelope.data;
+        } catch (error) {
+          if (error.name === "AbortError") throw new Error("请求超时，请稍后重试");
+          if (error instanceof TypeError) { updateOnline(false); throw new Error("无法连接本地服务，请确认启动程序仍在运行"); }
+          throw error;
+        } finally { clearTimeout(timer); }
+      }
+
+      function safeName(input) {
+        let value = Array.from(String(input || "").replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, "_").trim().replace(/^[. ]+|[. ]+$/g, "")).slice(0, 70).join("");
+        if (!value) value = "公众号";
+        if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$/i.test(value)) value = "_" + value;
+        return value;
+      }
+      function localDateInput(date) { const y = date.getFullYear(), m = String(date.getMonth() + 1).padStart(2, "0"), d = String(date.getDate()).padStart(2, "0"); return y + "-" + m + "-" + d; }
+      function dateFromInput(value) { const parts = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(value); if (!parts) return null; const d = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3])); return d.getFullYear() === Number(parts[1]) && d.getMonth() === Number(parts[2]) - 1 && d.getDate() === Number(parts[3]) ? d : null; }
+      function dateText(seconds) { const n = Number(seconds); return Number.isFinite(n) && n > 0 ? new Date(n * 1000).toLocaleDateString("zh-CN") : "日期未知"; }
+      function dateTimeText(millis) { const n = Number(millis); return Number.isFinite(n) && n > 0 ? new Date(n).toLocaleString("zh-CN", { dateStyle: "short", timeStyle: "short" }) : ""; }
+      function durationText(millis) { const seconds = Math.max(0, Math.floor(millis / 1000)); const h = Math.floor(seconds / 3600), m = Math.floor(seconds % 3600 / 60), s = seconds % 60; return (h ? h + "小时" : "") + (m ? m + "分" : "") + s + "秒"; }
+      function currentAccount() { return state.accounts.find((account) => account.biz === state.selected) || null; }
+      function isAccountView() { return state.selected !== "welcome" && state.selected !== "accounts" && state.selected !== "downloads"; }
+      function currentAccountScan(account) {
+        return account && state.selected === account.biz && state.scan.options && state.scan.options.biz === account.biz ? state.scan : null;
+      }
+      function scanFromPreviousSession(account, scan) {
+        return !!(account && scan && ["paused", "error"].includes(scan.status) && Number(account.update_time) > 0 && Number(scan.updated) > 0 && Number(account.update_time) * 1000 > Number(scan.updated));
+      }
+      function accountHistoryStatus(account) {
+        if (!account) return "请选择公众号";
+        const scan = currentAccountScan(account);
+        if (scan && scan.status === "complete" && Number(scan.pages) > 0 && scan.articles.length > 0) return "上次读取完成，文章列表已保存";
+        if (scan && scan.status === "partial" && scan.source === "author") return "已保存作者文章，公众号完整历史尚未确认";
+        if (scan && scan.status === "paused" && scan.error_code === "candidate_unverified") return "作者文章列表未确认";
+        if (account.history_credentials_present === false) return "缺少历史会话参数，历史列表不可读";
+        if (scanFromPreviousSession(account, scan)) return "新会话已导入，历史待重新验证";
+        if (scan && scan.error_code === "credentials_expired") return "历史会话已失效，请重新导入";
+        if (!account.is_effective) return scan && Number(scan.pages) > 0 ? "曾读取历史，当前会话需重新验证" : "会话参数较旧，历史待验证";
+        if (scan && scan.status === "running" && Number(scan.pages) > 0) return "已读取历史页面，正在继续";
+        return "有会话参数，历史尚未验证";
+      }
+
+      function renderNavigation() {
+        ui.welcomeNav.classList.toggle("active", state.selected === "welcome");
+        ui.accountsNav.classList.toggle("active", state.selected === "accounts" || isAccountView());
+        ui.downloadsNav.classList.toggle("active", state.selected === "downloads");
+        ui.welcomeView.hidden = state.selected !== "welcome";
+        ui.accountsView.hidden = state.selected !== "accounts";
+        ui.accountView.hidden = !isAccountView() || !!state.readerArticle;
+        ui.readerView.hidden = !state.readerArticle;
+        ui.mainPane.classList.toggle("reading", !!state.readerArticle);
+        ui.downloadsView.hidden = state.selected !== "downloads";
+        const account = currentAccount();
+        ui.crumb.textContent = state.readerArticle && state.readerReturnView === "downloads" ? "下载中心 / 本地阅读" : state.selected === "welcome" ? "开始归档" : state.selected === "accounts" ? "公众号列表" : state.selected === "downloads" ? "下载中心" : account ? "公众号列表 / " + account.nickname + (state.readerArticle ? " / 本地阅读" : "") : "公众号";
+        ui.sidebarAccountCount.textContent = String(state.accounts.length);
+        if (state.selected === "accounts") renderCatalog();
+        renderImportedArticle();
+      }
+      function matchingImportedLocalArticle() {
+        const imported = state.importedArticle;
+        if (!imported) return null;
+        const verified = imported.status && imported.status.state === "readable" ? imported.status.local_article : null;
+        const verifiedArticle = verified && (!imported.biz || verified.biz === imported.biz) && verified.id ? verified : null;
+        if (state.selected !== (imported.biz || verifiedArticle && verifiedArticle.biz)) return verifiedArticle || imported.localArticle || null;
+        const title = String(imported.title || "").normalize("NFKC").replace(/\s+/g, " ").trim();
+        const sameTitle = (item) => String(item.title || "").normalize("NFKC").replace(/\s+/g, " ").trim() === title;
+        const sourceMatches = imported.sourceId ? state.localLibrary.filter((item) => item.source_id === imported.sourceId) : [];
+        let match = sourceMatches.length === 1 ? sourceMatches[0] : null;
+        if (!sourceMatches.length) {
+          // Older exports may not have source metadata. A title is only a safe
+          // fallback when exactly one local item has it and no known identity
+          // contradicts the imported article.
+          const libraryMatches = state.localLibrary.filter(sameTitle);
+          if (libraryMatches.length === 1 && !libraryMatches[0].source_id) match = libraryMatches[0];
+          if (!match && !libraryMatches.length && state.localStatus) {
+            const sourceURL = stableArticleURL(imported.url);
+            const scanMatches = (state.scan.articles || []).filter((item) => state.localStatus.articleIds.has(item.id) && sourceURL && stableArticleURL(item.url) === sourceURL);
+            if (scanMatches.length === 1) match = scanMatches[0];
+            else if (!sourceURL && !imported.sourceId) {
+              const titleMatches = (state.scan.articles || []).filter((item) => state.localStatus.articleIds.has(item.id) && sameTitle(item));
+              if (titleMatches.length === 1) match = titleMatches[0];
+            }
+          }
+        }
+        match = match || verifiedArticle;
+        imported.localArticle = match;
+        return match;
+      }
+      async function refreshImportedStatus() {
+        const imported = state.importedArticle;
+        if (!imported || !/^[a-f0-9]{16}$/.test(imported.sourceId)) return;
+        const request = ++state.importedStatusRequest;
+        try {
+          const data = await api("/api/desktop/imported-status?source_id=" + imported.sourceId + (imported.biz ? "&biz=" + encodeURIComponent(imported.biz) : ""));
+          if (request !== state.importedStatusRequest || state.importedArticle !== imported) return;
+          if (!data || !["readable", "saved", "downloading", "none"].includes(data.state)) return;
+          imported.status = data;
+          if (data.state === "readable" && data.local_article && (!imported.biz || data.local_article.biz === imported.biz) && data.local_article.id) imported.localArticle = data.local_article;
+          else if (state.selected !== imported.biz) imported.localArticle = null;
+          renderImportedArticle();
+        } catch (_) { /* A status lookup must not hide an imported article or block downloading. */ }
+      }
+      function stableArticleURL(raw) {
+        try {
+          const url = new URL(String(raw || "").replace(/^officialaccount:\/\//i, ""));
+          const articlePath = url.pathname === "/s" || url.pathname === "/s/" || /^\/s\/[A-Za-z0-9_-]{1,256}$/.test(url.pathname) || url.pathname === "/mp/appmsg/show";
+          if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "mp.weixin.qq.com" || url.username || url.password || !articlePath) return "";
+          const keys = url.pathname === "/mp/appmsg/show" ? ["__biz", "appmsgid", "itemidx", "sign"] : ["__biz", "idx", "mid", "sn"];
+          const stable = new URL("https://mp.weixin.qq.com" + url.pathname);
+          for (const key of keys) if (url.searchParams.get(key)) stable.searchParams.set(key, url.searchParams.get(key));
+          return stable.href;
+        } catch (_) { return ""; }
+      }
+      function shareableArticleURL(raw) {
+        const stable = stableArticleURL(raw);
+        if (!stable) return "";
+        try {
+          const source = new URL(String(raw || "").replace(/^officialaccount:\/\//i, ""));
+          const link = new URL(stable);
+          if (link.pathname === "/s" || link.pathname === "/s/") {
+            for (const key of ["chksm", "scene"]) if (source.searchParams.get(key)) link.searchParams.set(key, source.searchParams.get(key));
+          }
+          return link.href;
+        } catch (_) { return stable; }
+      }
+      function renderImportedArticle() {
+        const article = state.importedArticle;
+        const localArticle = matchingImportedLocalArticle();
+        const importedState = article && article.status && article.status.state;
+        ui.importQuick.hidden = !article;
+        ui.importedArticleCard.hidden = !article || state.selected !== (article.biz || localArticle && localArticle.biz);
+        if (article) {
+          ui.importQuickTitle.textContent = "刚导入：" + displayArticleTitle(article.title);
+          ui.importedArticleTitle.textContent = displayArticleTitle(article.title);
+        }
+        ui.importedArticleHint.textContent = localArticle
+          ? "这篇文章已保存到本机，可直接阅读 Markdown。"
+          : importedState === "saved" ? "这篇文章已保存到本机，暂时无法在应用内定位 Markdown。可打开下载目录查看。"
+          : importedState === "downloading" ? "这篇文章正在下载，可在下载中心查看进度。"
+          : "可直接下载这一篇。批量读取历史取决于微信是否返回文章列表。";
+        for (const button of [ui.welcomeDownloadImported, ui.downloadImported]) {
+          button.disabled = !article || state.directDownloadBusy;
+          button.textContent = state.directDownloadBusy ? "正在添加任务…" : localArticle ? "阅读这篇文章"
+            : importedState === "saved" ? "打开下载目录" : importedState === "downloading" ? "查看下载进度" : "下载这篇文章";
+        }
+      }
+      async function activateImportedArticle() {
+        const article = state.importedArticle;
+        if (!article) return;
+        if (!matchingImportedLocalArticle()) await refreshImportedStatus();
+        const localArticle = matchingImportedLocalArticle();
+        if (!localArticle && article.status && article.status.state === "downloading") { selectView("downloads"); return; }
+        if (!localArticle && article.status && article.status.state === "saved") { await openDirectory(); return; }
+        if (!localArticle) { await downloadImportedArticle(); return; }
+        const articleBiz = article.biz || localArticle.biz;
+        if (state.selected !== articleBiz) {
+          selectView(articleBiz);
+          const selectedEpoch = state.noticeEpoch;
+          await Promise.allSettled([refreshLocalLibrary(true), refreshLocalStatus(), refreshScan()]);
+          if (state.noticeEpoch !== selectedEpoch || state.selected !== articleBiz) return;
+        }
+        const current = matchingImportedLocalArticle();
+        if (!current) { renderImportedArticle(); showNotice("本地文档已变化，请刷新后重试阅读。", true); return; }
+        await openReader(current, { fromImported: true });
+      }
+      function renderCatalog() {
+        const focusedBiz = document.activeElement && document.activeElement.catalogBiz;
+        const query = ui.catalogSearch.value.trim().toLocaleLowerCase();
+        const filtered = state.accounts.filter((account) => String(account.nickname || "").toLocaleLowerCase().includes(query) || String(account.biz || "").toLocaleLowerCase().includes(query));
+        const pages = Math.max(1, Math.ceil(filtered.length / CATALOG_PAGE_SIZE));
+        state.catalogPage = Math.max(1, Math.min(state.catalogPage, pages));
+        ui.catalogCount.textContent = query ? "找到 " + filtered.length + " 个 · 共 " + state.accounts.length + " 个公众号" : "共 " + state.accounts.length + " 个公众号";
+        clear(ui.catalogList);
+        if (!filtered.length) {
+          const empty = node("div", "card empty");
+          empty.append(node("strong", "", state.accounts.length ? "没有匹配的公众号" : "还没有导入公众号"), document.createTextNode(state.accounts.length ? "试试其他名称或公众号标识。" : "先从电脑微信复制一篇文章链接，在“开始归档”中导入。"));
+          ui.catalogList.append(empty);
+        } else {
+          const fragment = document.createDocumentFragment();
+          let focusTarget = null;
+          const start = (state.catalogPage - 1) * CATALOG_PAGE_SIZE;
+          for (const account of filtered.slice(start, start + CATALOG_PAGE_SIZE)) {
+            const name = String(account.nickname || "未命名公众号");
+            const button = node("button", "catalog-card");
+            button.type = "button"; button.title = "打开“" + name + "”的文章和本地文档"; button.catalogBiz = account.biz;
+            if (account.biz === focusedBiz) focusTarget = button;
+            const head = node("div", "catalog-card-head");
+            head.append(node("span", "catalog-avatar", Array.from(name)[0] || "文"), node("span", "catalog-card-name", name));
+            const meta = node("div", "catalog-card-meta");
+            const hasCredentials = account.history_credentials_present === true;
+            const summary = state.scanSummaries.get(account.biz);
+            const saved = Number(summary && summary.article_count || 0);
+            if (saved > 0) {
+              const complete = summary.status === "complete" && Number(summary.pages) > 0;
+              const status = complete ? "文章列表已保存 · " + saved + " 篇"
+                : summary.status === "running" ? "正在读取 · 已保存 " + saved + " 篇"
+                : summary.status === "partial" && summary.source === "author" ? "仅作者列表 · 已保存 " + saved + " 篇"
+                : "读取未完成 · 已保存 " + saved + " 篇";
+              const session = !hasCredentials ? "当前缺少历史会话参数" : account.is_effective ? "会话近期已识别" : "当前会话待验证";
+              meta.append(node("span", "catalog-status" + (complete ? " ready" : ""), status), node("span", "", session));
+            } else if (summary && summary.status === "paused" && summary.error_code === "candidate_unverified") {
+              meta.append(node("span", "catalog-status", "作者文章列表未确认"), node("span", "", "可打开详情查看原因"));
+            } else {
+              const status = hasCredentials ? account.is_effective ? "有会话参数 · 历史待验证" : "会话参数较旧" : "缺少历史会话参数";
+              meta.append(node("span", "catalog-status" + (hasCredentials && account.is_effective ? " ready" : ""), status));
+            }
+            if (Number(account.update_time) > 0) meta.append(node("span", "", "最近识别 " + dateText(account.update_time)));
+            const foot = node("div", "catalog-card-foot");
+            foot.append(node("span", "", "本地文档与下载状态在详情查看"), node("span", "", "打开详情 →"));
+            button.append(head, meta, foot);
+            button.addEventListener("click", () => { state.catalogScroll = mainScrollTop(); selectView(account.biz); });
+            fragment.append(button);
+          }
+          ui.catalogList.append(fragment);
+          if (focusTarget && typeof focusTarget.focus === "function") focusTarget.focus({ preventScroll: true });
+        }
+        ui.catalogPager.hidden = filtered.length <= CATALOG_PAGE_SIZE;
+        ui.catalogPageText.textContent = "第 " + state.catalogPage + " / " + pages + " 页 · " + filtered.length + " 个公众号";
+        ui.catalogPrev.disabled = state.catalogPage <= 1;
+        ui.catalogNext.disabled = state.catalogPage >= pages;
+      }
+      function renderWelcome() {
+        ui.welcomeFirstAccount.hidden = !state.accounts.length;
+        ui.welcomeHint.textContent = !state.online ? "本地服务尚未连接。请先启动程序。" : state.accounts.length ? "已导入或识别 " + state.accounts.length + " 个公众号。打开“公众号列表”可搜索、查看本地文档或尝试读取历史。" : "尚无公众号。请复制一篇微信文章链接，粘贴到上方导入。";
+        ui.downloadPath.textContent = state.downloadDir ? "下载目录：" + state.downloadDir : "";
+        ui.downloadPath.title = state.downloadDir || "";
+      }
+      async function refreshAccounts(showError = false, forceAfterBusy = false) {
+        if (state.accountBusy && !forceAfterBusy) return null;
+        const noticeEpoch = state.noticeEpoch;
+        while (state.accountBusy) await new Promise((resolve) => setTimeout(resolve, 50));
+        state.accountBusy = true;
+        try {
+          const first = await api("/api/mp/list?page=1&page_size=200");
+          if (!first || first.list != null && !Array.isArray(first.list)) throw new Error("公众号列表格式错误");
+          const accounts = (first.list || []).slice();
+          const pages = Math.min(100, Math.ceil(Number(first.total || accounts.length) / 200));
+          for (let page = 2; page <= pages; page++) {
+            const next = await api("/api/mp/list?page=" + page + "&page_size=200");
+            if (!next || next.list != null && !Array.isArray(next.list)) throw new Error("公众号列表格式错误");
+            accounts.push(...(next.list || []));
+          }
+          const unique = new Map();
+          for (const account of accounts) if (account && account.biz) unique.set(account.biz, account);
+          const sorted = Array.from(unique.values()).sort((a, b) => String(a.nickname || "").localeCompare(String(b.nickname || ""), "zh-CN") || String(a.biz).localeCompare(String(b.biz)));
+          let summaries = state.scanSummaries;
+          try {
+            const data = await api("/api/desktop/scan-summaries");
+            if (data && typeof data === "object" && !Array.isArray(data)) summaries = new Map(Object.entries(data));
+          } catch (_) { /* Keep the last local scan summaries if this refresh fails. */ }
+          const fingerprint = JSON.stringify(sorted.map((account) => [account.biz, account.nickname, account.is_effective, account.history_credentials_present, account.update_time, summaries.get(account.biz)]));
+          state.accounts = sorted;
+          state.scanSummaries = summaries;
+          if (fingerprint !== state.accountFingerprint) {
+            state.accountFingerprint = fingerprint;
+            renderNavigation(); if (isAccountView()) renderScanState();
+          }
+          if (state.selected === "downloads" && state.tasks.length && state.taskDataPage === state.taskPage && state.taskDataFilter === ui.taskFilter.value) {
+            renderTasks();
+            void hydrateTaskTitles(state.downloadRequest, ui.taskFilter.value, state.taskPage);
+          }
+          renderWelcome();
+          return state.accounts;
+        } catch (error) { renderWelcome(); if (showError) showNotice(errorText(error), true, noticeEpoch); return null; }
+        finally { state.accountBusy = false; }
+      }
+      function setImportMessage(message, isError = false) { ui.importMessage.textContent = message; ui.importMessage.classList.toggle("error", isError); }
+      function validatedArticleUrl(raw) {
+        const value = String(raw || "").trim();
+        if (!value) throw new Error("请先粘贴微信文章链接");
+        let url;
+        try { url = new URL(value); } catch (_) { throw new Error("链接格式无效，请复制完整的微信文章链接"); }
+        const articlePath = url.pathname === "/s" || url.pathname === "/s/" || /^\/s\/[A-Za-z0-9_-]{1,256}$/.test(url.pathname);
+        if (url.protocol !== "https:" || url.host.toLowerCase() !== "mp.weixin.qq.com" || !articlePath || url.username || url.password) throw new Error("请使用 mp.weixin.qq.com 的 HTTPS 文章链接，支持 /s/ 后接文章短码");
+        return value;
+      }
+      async function importArticle(event) {
+        event.preventDefault();
+        if (state.importBusy) return;
+        const importEpoch = state.noticeEpoch;
+        let url;
+        const pasted = ui.importUrl.value;
+        try { url = validatedArticleUrl(pasted); } catch (error) { setImportMessage(errorText(error), true); ui.importUrl.focus(); return; }
+        state.importBusy = true; ui.importButton.disabled = true; ui.importUrl.disabled = true; ui.importButton.textContent = "正在导入…";
+        setImportMessage("正在读取文章并识别公众号，请稍候…");
+        const previous = new Set(state.accounts.map((account) => account.biz));
+        try {
+          const data = await api("/api/mp/import_url", { url }, { timeout: 90000 });
+          const biz = String(data && (data.biz || data.account && data.account.biz) || new URL(url).searchParams.get("__biz") || "");
+          const historyHint = String(data && data.history_reason || (data && data.history_available === false ? "当前链接可下载这篇文章，但不能读取历史列表。" : "历史列表是否可用，以微信实际返回为准。"));
+          let title = String(data && data.title || "").trim();
+          if (!title) {
+            try { const probe = await api("/api/mp/article/probe", { URL: url }, { timeout: 60000 }); title = String(probe && probe.title || "").trim(); }
+            catch (_) { /* The article can still be queued with a generic filename. */ }
+          }
+          state.importedArticle = { url, biz, nickname: String(data && data.nickname || "公众号"), title: safeTitle(title), sourceId: String(data && data.source_id || "") };
+          ui.importUrl.value = "";
+          renderImportedArticle();
+          void refreshImportedStatus();
+          if (state.noticeEpoch !== importEpoch) return;
+          if (!biz) {
+            selectView("welcome");
+            setImportMessage("已识别这篇文章。下方按钮会按本地文件状态更新。" + historyHint);
+            showNotice("文章已识别。" + historyHint);
+            return;
+          }
+          const accounts = await refreshAccounts(false, true);
+          if (state.noticeEpoch !== importEpoch) return;
+          const account = accounts && (accounts.find((item) => item.biz === biz) || accounts.find((item) => !previous.has(item.biz) && data && item.nickname === data.nickname));
+          if (!account) {
+            selectView("welcome");
+            setImportMessage("文章已导入。下方按钮会按本地文件状态更新；公众号列表暂未更新。" + historyHint);
+            return;
+          }
+          state.importedArticle.nickname = String(account.nickname || state.importedArticle.nickname);
+          selectView(account.biz);
+          const accountEpoch = state.noticeEpoch;
+          await Promise.allSettled([refreshLocalLibrary(true), refreshLocalStatus(), refreshImportedStatus()]);
+          if (state.noticeEpoch !== accountEpoch || state.selected !== account.biz) return;
+          const localArticle = matchingImportedLocalArticle();
+          const importedState = state.importedArticle.status && state.importedArticle.status.state;
+          const action = localArticle ? "这篇文章已在本机，可直接阅读。"
+            : importedState === "saved" ? "这篇文章已保存在下载目录。"
+            : importedState === "downloading" ? "这篇文章正在下载，可查看进度。" : "可以直接下载这篇文章。";
+          const importHistoryHint = localArticle && data && data.history_available === false ? "此链接无法读取历史列表。" : historyHint;
+          renderImportedArticle();
+          setImportMessage("已导入“" + (account.nickname || "公众号") + "”。下方按钮会按本地文件状态更新。" + importHistoryHint);
+          showNotice("已导入“" + (account.nickname || "公众号") + "”。" + action + importHistoryHint, false, accountEpoch);
+        } catch (error) {
+          const message = errorText(error);
+          setImportMessage("导入失败：" + message + (message.includes("无法连接本地服务") ? "" : "\n请确认链接完整，且这篇文章可以正常打开。"), true);
+        } finally {
+          state.importBusy = false; ui.importButton.disabled = false; ui.importUrl.disabled = false; ui.importButton.textContent = "导入文章";
+        }
+      }
+      function singleArticleFilename(article) {
+        const parsed = new URL(article.url);
+        const mid = parsed.searchParams.get("mid") || "";
+        const idx = parsed.searchParams.get("idx") || "1";
+        const identifier = /^[A-Za-z0-9_-]{1,32}$/.test(mid) && /^[A-Za-z0-9_-]{1,8}$/.test(idx) ? mid + "-" + idx : batchId().slice(0, 12);
+        return safeName(article.title) + "-" + identifier + ".html";
+      }
+      async function downloadImportedArticle() {
+        const article = state.importedArticle;
+        if (!article || state.directDownloadBusy) return;
+        const actionEpoch = state.noticeEpoch;
+        state.directDownloadBusy = true; renderImportedArticle();
+        try {
+          const started = String(Date.now());
+          const payload = {
+            URL: "officialaccount://" + article.url,
+            Filename: singleArticleFilename(article),
+            Dir: safeName(article.nickname),
+            on_exists: "skip",
+            Extra: { batch_id: batchId(), batch_total: "1", batch_started_at: started, account_name: article.nickname, account_biz: article.biz, article_title: article.title, download_mode: state.mode }
+          };
+          await api("/api/task/create2", payload, { timeout: 90000 });
+          if (state.noticeEpoch !== actionEpoch) return;
+          selectView("downloads");
+          showNotice("这篇文章已加入下载中心，可在任务列表查看进度。");
+        } catch (error) {
+          if (state.noticeEpoch !== actionEpoch) return;
+          const duplicate = error && error.code === 409 && ["文章已在下载队列中", "已存在该下载内容", "目标目录已存在该文章文件"].includes(error.message);
+          if (duplicate) {
+            if (error.message === "文章已在下载队列中") {
+              selectView("downloads");
+              showNotice("这篇文章已在下载队列中，未重复添加。可在下载中心查看进度。");
+            } else {
+              if (article.biz && state.accounts.some((account) => account.biz === article.biz)) {
+                selectView(article.biz);
+                const accountEpoch = state.noticeEpoch;
+                await Promise.allSettled([refreshLocalLibrary(true), refreshLocalStatus()]);
+                if (state.noticeEpoch !== accountEpoch || state.selected !== article.biz) return;
+              }
+              const localArticle = matchingImportedLocalArticle();
+              renderImportedArticle();
+              showNotice(localArticle
+                ? "这篇文章已在本机，未重复下载。可点击“阅读这篇文章”直接查看。"
+                : "这篇文章已在本机，未重复下载。请刷新本地文档或打开公众号文件夹查看。", !localArticle);
+            }
+          } else {
+            showNotice("添加单篇文章任务失败：" + errorText(error), true);
+          }
+        } finally { state.directDownloadBusy = false; renderImportedArticle(); }
+      }
+      function selectView(view, refreshSame = false, restoreCatalogScroll = false) {
+        if (state.readerArticle) closeReader(state.selected === view, false);
+        if (state.selected === view) {
+          if (refreshSame && isAccountView()) { refreshScan(); refreshLocalStatus(); refreshLocalLibrary(true); }
+          return;
+        }
+        if (state.selected === "accounts") state.catalogScroll = mainScrollTop();
+        leaveNoticeScope();
+        state.selected = view;
+        state.scanRequest++; state.localStatusRequest++; state.localLibraryRequest++; state.downloadRequest++; state.taskRequest++;
+        state.scan = emptyScan(); state.scanOptionsLoaded = false; state.lastScanKey = "";
+        state.localStatus = null; state.localLibrary = []; state.localLibraryPage = 1; state.localLibraryState = view === "welcome" || view === "accounts" || view === "downloads" ? "idle" : "loading"; ui.localLibrarySearch.value = "";
+        state.selectedIds.clear(); state.articlePage = 1; ui.articleSearch.value = ""; ui.queueState.textContent = "先检查最近和最早的文章，再按实际下载结果逐批添加。";
+        renderNavigation();
+        scrollMainTo(view === "accounts" && restoreCatalogScroll ? state.catalogScroll : 0);
+        void refreshImportedStatus();
+        if (view === "downloads") refreshDownloads(true);
+        else if (isAccountView()) { renderAccountHeader(); renderLocalStatus(); renderLocalLibrary(); renderScanState(); renderArticles(); refreshScan(true); refreshLocalStatus(true); refreshLocalLibrary(true); }
+      }
+
+      function renderAccountHeader() {
+        const account = currentAccount();
+        ui.accountTitle.textContent = account ? account.nickname || "未命名公众号" : "公众号";
+        const count = Array.isArray(state.scan.articles) ? state.scan.articles.length : 0;
+        const local = state.localStatus;
+        const downloaded = count > 0 && local && local.total === count ? " · 本地已下载 " + local.downloaded + " / " + count + " 篇" : "";
+        const history = state.scanSource === "weread" ? "微信读书收录列表，可能不是公众号完整历史" : accountHistoryStatus(account);
+        ui.accountDetail.textContent = history + (count ? " · 已保存 " + count + " 篇文章" : "") + downloaded + (state.localLibrary.length ? " · 另有 " + state.localLibrary.length + " 篇本地文档" : "");
+      }
+      function renderLocalStatus() {
+        const local = state.localStatus;
+        const total = local ? local.total : 0, downloaded = local ? local.downloaded : 0;
+        const complete = total > 0 && downloaded === total, localOnly = state.localLibrary.length;
+        ui.localStatusCard.classList.toggle("complete", complete || !total && localOnly > 0);
+        ui.localStatusMark.textContent = complete || !total && localOnly > 0 ? "✓" : "⌕";
+        ui.localStatusTitle.textContent = !local ? "正在核对本地文件…" : complete
+          ? "当前列表的 " + total + " 篇文章已下载到本地"
+          : downloaded ? "本地已下载 " + downloaded + " / " + total + " 篇文章"
+          : total ? "当前列表的文章尚未下载到本地" : localOnly ? "本地有 " + localOnly + " 篇文章可直接阅读"
+          : state.localLibraryState === "loading" ? "正在查找本地文档…" : state.localLibraryState === "error" ? "本地文档暂时无法读取" : "历史列表暂无文章，本地暂无可阅读文档";
+        ui.localStatusDetail.textContent = !local ? "下载状态会按磁盘上的 HTML、Markdown 和纯文本文件核对。"
+          : complete ? "HTML、Markdown 和纯文本文件均已核对，可直接点击下方已下载的文章阅读。"
+          : total ? "根据实际文件核对；缺少任一种格式的文章不会标记为已下载。"
+          : localOnly ? "历史列表暂不可用；下方文档已从本机文件读取。"
+          : state.localLibraryState === "loading" ? "正在核对该公众号的本地 Markdown 文件。"
+          : state.localLibraryState === "error" ? "请点击右上方“刷新”，重新核对本地文件。" : "可导入文章链接并下载，完成后会在下方显示。";
+        ui.localStatusOpenDir.disabled = !currentAccount();
+      }
+      async function refreshLocalStatus(showError = false) {
+        if (!isAccountView()) return;
+        const biz = state.selected, source = state.scanSource, request = ++state.localStatusRequest, noticeEpoch = state.noticeEpoch;
+        try {
+          const data = await api("/api/desktop/local-status?biz=" + encodeURIComponent(biz) + (source === "weread" ? "&source=weread" : ""));
+          if (request !== state.localStatusRequest || state.selected !== biz || state.scanSource !== source) return;
+          if (!data || !Number.isInteger(data.total) || !Number.isInteger(data.downloaded) || !Array.isArray(data.article_ids) || data.downloaded !== data.article_ids.length || data.downloaded > data.total) throw new Error("本地下载状态格式错误");
+          state.localStatus = { total: data.total, downloaded: data.downloaded, articleIds: new Set(data.article_ids), downloadDir: String(data.download_dir || "") };
+          renderLocalStatus(); renderAccountHeader(); renderArticles(); renderQueueButtons(); renderImportedArticle();
+        } catch (error) {
+          if (request !== state.localStatusRequest || state.selected !== biz || state.scanSource !== source) return;
+          state.localStatus = null;
+          renderLocalStatus(); renderAccountHeader(); renderArticles(); renderQueueButtons(); renderImportedArticle();
+          if (showError) showNotice("核对本地文件失败：" + errorText(error), true, noticeEpoch);
+        }
+      }
+      function renderLocalLibrary() {
+        const library = state.localLibrary;
+        ui.localLibraryCard.hidden = !library.length && !!(state.scan.articles || []).length;
+        if (!library.length) {
+          ui.localLibraryTitle.textContent = "本地文档";
+          clear(ui.localLibraryList);
+          const message = state.localLibraryState === "loading" ? "正在查找本地文档…"
+            : state.localLibraryState === "error" ? "暂时无法读取本地文档，请点击“刷新”重试。"
+            : "这个公众号暂无可阅读的本地 Markdown 文档。";
+          ui.localLibraryList.append(node("div", "empty", message));
+          ui.localLibraryPager.hidden = true;
+          return;
+        }
+        const query = ui.localLibrarySearch.value.trim().toLocaleLowerCase();
+        const articles = query ? library.filter((article) => displayArticleTitle(article.title).toLocaleLowerCase().includes(query)) : library;
+        const pages = Math.max(1, Math.ceil(articles.length / LOCAL_LIBRARY_PAGE_SIZE));
+        state.localLibraryPage = Math.min(state.localLibraryPage, pages);
+        ui.localLibraryTitle.textContent = "本地文档 · " + library.length + " 篇";
+        clear(ui.localLibraryList);
+        if (!articles.length) ui.localLibraryList.append(node("div", "empty", "没有匹配的本地文档"));
+        else {
+          const start = (state.localLibraryPage - 1) * LOCAL_LIBRARY_PAGE_SIZE;
+          const fragment = document.createDocumentFragment();
+          for (const article of articles.slice(start, start + LOCAL_LIBRARY_PAGE_SIZE)) {
+            const row = node("div", "article-row");
+            const main = node("div", "article-main");
+            const title = node("button", "article-title article-title-button", displayArticleTitle(article.title));
+            title.type = "button"; title.title = "阅读本地 Markdown"; title.addEventListener("click", () => openReader(article));
+            main.append(title, node("span", "article-local-status downloaded", "✓ 已下载到本地"));
+            const date = node("span", "article-date", "本地保存 " + dateText(article.published));
+            row.append(main, date); fragment.append(row);
+          }
+          ui.localLibraryList.append(fragment);
+        }
+        ui.localLibraryPager.hidden = articles.length <= LOCAL_LIBRARY_PAGE_SIZE;
+        ui.localLibraryPageText.textContent = "第 " + state.localLibraryPage + " / " + pages + " 页";
+        ui.localLibraryPrev.disabled = state.localLibraryPage <= 1;
+        ui.localLibraryNext.disabled = state.localLibraryPage >= pages;
+      }
+      async function refreshLocalLibrary(showError = false) {
+        if (!isAccountView()) return;
+        const biz = state.selected, request = ++state.localLibraryRequest, noticeEpoch = state.noticeEpoch;
+        if (!state.localLibrary.length && (showError || state.localLibraryState === "idle")) { state.localLibraryState = "loading"; renderLocalLibrary(); renderLocalStatus(); }
+        try {
+          const data = await api("/api/desktop/local-library?biz=" + encodeURIComponent(biz));
+          if (request !== state.localLibraryRequest || state.selected !== biz) return;
+          if (!data || !Array.isArray(data.articles) || !data.articles.every((article) => article && typeof article.id === "string" && typeof article.title === "string")) throw new Error("本地文档列表格式错误");
+          state.localLibrary = data.articles;
+          state.localLibraryState = "ready";
+          renderLocalLibrary(); renderLocalStatus(); renderAccountHeader(); renderImportedArticle();
+          if (!(state.scan.articles || []).length) renderArticles();
+        } catch (error) {
+          if (request !== state.localLibraryRequest || state.selected !== biz) return;
+          state.localLibrary = [];
+          state.localLibraryState = "error";
+          renderLocalLibrary(); renderLocalStatus(); renderAccountHeader(); renderImportedArticle();
+          if (!(state.scan.articles || []).length) renderArticles();
+          if (showError) showNotice("读取本地文档失败：" + errorText(error), true, noticeEpoch);
+        }
+      }
+      function renderModeFields() { const mode = ui.scanMode.value; ui.limitField.hidden = mode !== "recent"; ui.afterField.hidden = mode !== "date"; ui.beforeField.hidden = mode !== "date"; }
+      function loadScanOptions(options) {
+        if (!options || !["recent", "all", "date"].includes(options.mode)) return;
+        ui.scanMode.value = options.mode; ui.scanLimit.value = String(options.limit || 20);
+        if (options.after) ui.scanAfter.value = localDateInput(new Date(Number(options.after) * 1000));
+        if (options.before) ui.scanBefore.value = localDateInput(new Date(Number(options.before) * 1000));
+        renderModeFields();
+      }
+      function scanBody(resume) {
+        const account = currentAccount(); if (!account) throw new Error("请先选择公众号");
+        const mode = ui.scanMode.value;
+        const body = { biz: account.biz, mode, limit: 20, after: 0, before: 0, resume: !!resume };
+        if (mode === "recent") { const limit = Number(ui.scanLimit.value); if (!Number.isInteger(limit) || limit < 1 || limit > 10000) throw new Error("篇数须在 1–10000 之间"); body.limit = limit; }
+        if (mode === "date") { const after = dateFromInput(ui.scanAfter.value), before = dateFromInput(ui.scanBefore.value); if (!after || !before || before < after) throw new Error("日期范围无效，请检查开始和结束日期"); body.after = Math.floor(after.getTime() / 1000); body.before = Math.floor((new Date(before.getFullYear(), before.getMonth(), before.getDate() + 1).getTime() - 1000) / 1000); }
+        return body;
+      }
+      function setScanSource(source) {
+        if (source !== "wechat" && source !== "weread" || state.scanSource === source) return;
+        state.scanSource = source;
+        try { localStorage.setItem("mpArchiveScanSource", source); } catch (_) {}
+        state.scanRequest++; state.localStatusRequest++;
+        state.scan = emptyScan(); state.scanOptionsLoaded = false; state.lastScanKey = ""; state.localStatus = null;
+        state.selectedIds.clear(); state.articlePage = 1; ui.articleSearch.value = "";
+        renderScanState(); renderArticles(); renderLocalStatus();
+        if (isAccountView()) { void refreshScan(true); void refreshLocalStatus(true); }
+      }
+      function startWereadScan() {
+        const account = currentAccount();
+        if (!account) { showNotice("请先选择公众号", true); return; }
+        if (!window.chrome || !window.chrome.webview || typeof window.chrome.webview.postMessage !== "function") {
+          showNotice("请在 Windows 客户端中使用微信读书读取功能。", true); return;
+        }
+        let numeric;
+        try { numeric = atob(String(account.biz || "")); } catch (_) { numeric = ""; }
+        if (!/^\d{1,32}$/.test(numeric)) { showNotice("该公众号的标识无法转换为微信读书 bookId。", true); return; }
+        window.chrome.webview.postMessage({ type: "weread-start", biz: account.biz, bookId: "MP_WXS_" + numeric });
+        showNotice("微信读书窗口已打开；完成手机扫码后会从已保存进度读取。", false);
+      }
+      function renderScanState() {
+        const status = state.scan.status || "idle";
+        const weread = state.scanSource === "weread";
+        ui.sourceWechat.classList.toggle("active", !weread); ui.sourceWechat.setAttribute("aria-pressed", String(!weread));
+        ui.sourceWeread.classList.toggle("active", weread); ui.sourceWeread.setAttribute("aria-pressed", String(weread));
+        ui.legacyScanControls.hidden = weread; ui.wereadActions.hidden = !weread;
+        const wereadEnded = !!state.scan.reached_end;
+        ui.wereadStart.disabled = !state.online || state.queueBusy || wereadEnded;
+        ui.wereadStart.textContent = wereadEnded ? "收录列表已读完" : state.scan.offset > 0 ? "继续读取微信读书收录" : "开始读取微信读书收录";
+        ui.scanState.classList.toggle("error", status === "error"); ui.scanState.classList.toggle("running", status === "running");
+        ui.scanStateIcon.textContent = status === "running" ? "◌" : status === "error" ? "!" : status === "complete" ? "✓" : "ℹ";
+        const account = currentAccount();
+        const scanMessage = !weread && scanFromPreviousSession(account, currentAccountScan(account))
+          ? "新文章链接已导入。上次的暂停提示属于旧会话；可以继续已保存的进度，或重新读取。"
+          : state.scan.message || (status === "idle" ? weread ? "点击开始读取微信读书收录列表；收录范围可能不完整。" : "选择范围后读取文章" : "正在读取文章");
+        ui.scanStateText.textContent = scanMessage.replace("请在微信重新打开文章后继续读取。", "请从电脑微信复制新文章链接，在首页重新导入后继续读取。");
+        ui.scanPause.hidden = status !== "running";
+        ui.scanRestart.hidden = !["paused", "error"].includes(status);
+        ui.scanResume.hidden = !["paused", "error"].includes(status);
+        ui.scanStart.hidden = status === "running" || ["paused", "error"].includes(status);
+        ui.scanStart.textContent = (state.scan.articles || []).length ? "重新读取" : "读取文章";
+        for (const button of [ui.scanPause, ui.scanRestart, ui.scanResume, ui.scanStart]) button.disabled = state.scanBusy || state.queueBusy || !state.online;
+        renderAccountHeader(); renderQueueButtons();
+      }
+      async function refreshScan(showError = false) {
+        if (!isAccountView()) return;
+        const biz = state.selected, source = state.scanSource, request = ++state.scanRequest, noticeEpoch = state.noticeEpoch;
+        try {
+          const path = source === "weread" ? "/api/desktop/weread/scan" : "/api/desktop/scan";
+          const scan = await api(path + "?biz=" + encodeURIComponent(biz));
+          if (request !== state.scanRequest || state.selected !== biz || state.scanSource !== source) return;
+          if (!scan || !Array.isArray(scan.articles)) throw new Error("读取状态格式错误");
+          state.scan = scan;
+          if (source === "wechat") rememberDownloadScan(biz, scan);
+          if (source === "wechat" && !state.scanOptionsLoaded) { loadScanOptions(scan.options); state.scanOptionsLoaded = true; }
+          const key = [scan.status, scan.message, scan.updated, scan.articles.length].join("|");
+          renderScanState();
+          if (key !== state.lastScanKey) { state.lastScanKey = key; renderArticles(); renderLocalLibrary(); renderImportedArticle(); if (state.localStatus) refreshLocalStatus(); }
+        } catch (error) { if (showError && state.selected === biz && state.scanSource === source) showNotice(errorText(error), true, noticeEpoch); }
+      }
+      async function startScan(resume = false) {
+        if (state.scanSource !== "wechat") return;
+        if (state.scanBusy || state.queueBusy) return;
+        let body; try { body = scanBody(resume); } catch (error) { showNotice(errorText(error), true); return; }
+        const noticeEpoch = state.noticeEpoch;
+        state.scanBusy = true; renderScanState();
+        try {
+          const scan = await api("/api/desktop/scan", body);
+          if (state.noticeEpoch === noticeEpoch && state.selected === body.biz && scan && Array.isArray(scan.articles)) { state.scan = scan; rememberDownloadScan(body.biz, scan); state.lastScanKey = ""; if (!resume) { state.selectedIds.clear(); state.articlePage = 1; } renderScanState(); renderArticles(); renderLocalLibrary(); renderImportedArticle(); }
+          if (state.noticeEpoch === noticeEpoch && state.selected === body.biz) await refreshScan();
+        } catch (error) { showNotice(errorText(error), true, noticeEpoch); }
+        finally { state.scanBusy = false; renderScanState(); }
+      }
+      async function pauseScan() {
+        if (state.scanSource !== "wechat") return;
+        const account = currentAccount(); if (!account || state.scanBusy) return;
+        const noticeEpoch = state.noticeEpoch;
+        state.scanBusy = true; renderScanState();
+        try { await api("/api/desktop/scan/pause", { biz: account.biz }, { expectData: false }); showNotice("正在保存断点并暂停…", false, noticeEpoch); if (state.noticeEpoch === noticeEpoch && state.selected === account.biz) await refreshScan(); }
+        catch (error) { showNotice(errorText(error), true, noticeEpoch); }
+        finally { state.scanBusy = false; renderScanState(); }
+      }
+
+      function visibleArticles() {
+        const query = ui.articleSearch.value.trim().toLocaleLowerCase();
+        const articles = Array.isArray(state.scan.articles) ? state.scan.articles : [];
+        return query ? articles.filter((article) => String(article.title || "").toLocaleLowerCase().includes(query) || String(article.digest || "").toLocaleLowerCase().includes(query)) : articles;
+      }
+      function renderSelectionCount() { const count = state.selectedIds.size; ui.selectionCount.textContent = count ? "已选择 " + count + " 篇" : "未选择文章"; renderQueueButtons(); }
+      function renderQueueButtons() {
+        const total = Array.isArray(state.scan.articles) ? state.scan.articles.length : 0;
+        const local = state.localStatus && state.localStatus.total === total ? state.localStatus : null;
+        const remaining = local ? Math.max(0, total - local.downloaded) : total;
+        ui.queueStop.hidden = !state.queueBusy; ui.queueSelected.hidden = state.queueBusy; ui.queueAll.hidden = state.queueBusy;
+        ui.queueSelected.disabled = !state.online || state.queueBusy || !state.selectedIds.size;
+        ui.queueAll.disabled = !state.online || state.queueBusy || !remaining || state.scan.status === "running";
+        ui.queueAll.textContent = local && !remaining ? "已全部下载 " + total + " 篇" : local && local.downloaded
+          ? "下载未保存的 " + remaining + " 篇" : state.scan.status === "complete" ? "下载全部 " + total + " 篇" : "下载已读取的 " + total + " 篇";
+      }
+      function readerArticleURL(article) {
+        let candidate = article.url;
+        const imported = state.importedArticle;
+        if (!candidate && imported && (!imported.biz || imported.biz === state.selected)) {
+          const matched = matchingImportedLocalArticle();
+          if (matched && matched.id === article.id) candidate = imported.url;
+        }
+        return shareableArticleURL(candidate);
+      }
+      function setReaderLink(url) {
+        state.readerLink = shareableArticleURL(url);
+        ui.readerCopyLink.disabled = !state.readerLink;
+        ui.readerCopyLink.textContent = state.readerLink ? "复制文章链接" : "原文链接不可用";
+        ui.readerCopyLink.title = state.readerLink ? "复制微信文章原始链接" : "本地文档未保存原始文章链接";
+      }
+      function readerDocument(content, version) {
+        const origin = window.location.origin.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+        return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'none\'; img-src ' + origin + ' data:; style-src \'unsafe-inline\'; base-uri \'none\'; form-action \'none\'"><style>' +
+          ':root{font-family:"Microsoft YaHei UI","Segoe UI",sans-serif;color:#1d2b29;background:#fff;font-size:16px}*{box-sizing:border-box}body{max-width:820px;margin:0 auto;padding:34px 34px 70px;line-height:1.85;overflow-wrap:anywhere}p{margin:0 0 1.15em}h1,h2,h3,h4{color:#142c28;line-height:1.45;margin:1.6em 0 .6em}h1{font-size:1.75em}h2{font-size:1.45em}h3{font-size:1.2em}a{color:#0a6a60}a:hover{text-decoration-thickness:2px}img{display:block;max-width:100%;height:auto;margin:1.5em auto}blockquote{margin:1.3em 0;padding:.15em 1.2em;border-left:3px solid #b6d8d0;background:#f6f9f8;color:#47605b}' +
+          'code{font-family:Consolas,"SFMono-Regular",monospace;font-size:.91em}:not(pre)>code{padding:2px 5px;border:1px solid #d4e8e0;border-radius:5px;background:#edf7f3;color:#075b52}' +
+          '.reader-code-block{position:relative;max-width:100%;margin:1.35em 0;border:1px solid #d4e1de;border-radius:10px;background:#f5f8f7;overflow:hidden}' +
+          'pre{max-width:100%;margin:0;padding:50px 18px 18px;overflow-x:hidden;background:#f5f8f7;color:#213d3a;font-size:14px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;tab-size:4}pre code{display:block;padding:0;border:0;background:transparent;color:inherit;font-size:inherit;white-space:inherit;overflow-wrap:inherit;word-break:inherit}' +
+          '.reader-code-copy{position:absolute;top:10px;right:10px;z-index:1;min-height:28px;padding:3px 10px;border:1px solid #bdd2cb;border-radius:6px;background:#fff;color:#26564e;font:600 12px/1.4 "Microsoft YaHei UI","Segoe UI",sans-serif;cursor:pointer}.reader-code-copy:hover{background:#e8f4ef}.reader-code-copy:focus-visible{outline:2px solid #0a6a60;outline-offset:2px}' +
+          '.reader-table-scroll{max-width:100%;margin:1.3em 0;overflow-x:auto;border:1px solid #dce5e2;border-radius:8px}table{width:max-content;min-width:100%;border-collapse:collapse;line-height:1.6}td,th{min-width:90px;max-width:340px;padding:9px 12px;border-right:1px solid #dce5e2;border-bottom:1px solid #dce5e2;vertical-align:top;overflow-wrap:break-word}td:last-child,th:last-child{border-right:0}tr:last-child td{border-bottom:0}th{background:#f1f7f4;color:#213d3a;text-align:left;font-weight:700}tr:nth-child(even) td{background:#fafcfb}hr{border:0;border-top:1px solid #dce5e2;margin:2em 0}@media(max-width:640px){body{padding:20px 18px 48px}pre{font-size:13px}}' +
+          '</style></head><body data-reader-version="' + version + '">' + content + '</body></html>';
+      }
+      function clearReaderCopyTimers() {
+        for (const timer of readerCopyTimers.values()) clearTimeout(timer);
+        readerCopyTimers.clear();
+      }
+      function setReaderContent(content) {
+        clearReaderCopyTimers();
+        const version = ++state.readerDocumentVersion;
+        ui.readerFrame.srcdoc = readerDocument(content, version);
+      }
+      function readerFrameIsCurrent(doc, version) {
+        return !!state.readerArticle && version === state.readerDocumentVersion && ui.readerFrame.contentDocument === doc;
+      }
+      function readerCopyFeedback(button, message, doc, version) {
+        const previous = readerCopyTimers.get(button);
+        if (previous !== undefined) clearTimeout(previous);
+        button.textContent = message;
+        const timer = setTimeout(() => {
+          readerCopyTimers.delete(button);
+          if (readerFrameIsCurrent(doc, version)) button.textContent = "复制";
+        }, 1800);
+        readerCopyTimers.set(button, timer);
+      }
+      function enhanceReaderCodeBlocks() {
+        const doc = ui.readerFrame.contentDocument, body = doc && doc.body;
+        const version = Number(body && body.getAttribute("data-reader-version"));
+        if (!doc || !body || !Number.isInteger(version) || !readerFrameIsCurrent(doc, version)) return;
+        for (const table of doc.querySelectorAll("table")) {
+          if (table.parentElement && table.parentElement.classList.contains("reader-table-scroll")) continue;
+          const wrapper = doc.createElement("div");
+          wrapper.className = "reader-table-scroll";
+          table.parentNode.insertBefore(wrapper, table);
+          wrapper.append(table);
+        }
+        doc.addEventListener("click", (event) => {
+          if (!readerFrameIsCurrent(doc, version)) return;
+          const link = event.target.closest && event.target.closest('a[href^="#"]');
+          if (!link) return;
+          event.preventDefault();
+          const fragment = link.getAttribute("href").slice(1);
+          let id = fragment;
+          try { id = decodeURIComponent(fragment); } catch (_) { return; }
+          if (id) doc.getElementById(id)?.scrollIntoView({ block: "start" });
+        });
+        for (const pre of doc.querySelectorAll("pre")) {
+          if (pre.parentElement && pre.parentElement.classList.contains("reader-code-block")) continue;
+          const wrapper = doc.createElement("div"), button = doc.createElement("button");
+          wrapper.className = "reader-code-block";
+          button.className = "reader-code-copy";
+          button.type = "button";
+          button.textContent = "复制";
+          button.setAttribute("aria-label", "复制代码块");
+          pre.parentNode.insertBefore(wrapper, pre);
+          wrapper.append(pre, button);
+          button.addEventListener("click", async () => {
+            if (!readerFrameIsCurrent(doc, version)) return;
+            const code = pre.querySelector("code");
+            const content = String((code || pre).textContent || "");
+            try {
+              await navigator.clipboard.writeText(content);
+              if (readerFrameIsCurrent(doc, version)) readerCopyFeedback(button, "已复制", doc, version);
+            } catch (_) {
+              if (readerFrameIsCurrent(doc, version)) readerCopyFeedback(button, "复制失败", doc, version);
+            }
+          });
+        }
+      }
+      async function openReader(article, options = {}) {
+        const biz = state.selected;
+        const imported = state.importedArticle;
+        const verifiedImported = options.fromImported && imported && imported.status && imported.status.state === "readable"
+          && imported.status.local_article && imported.status.local_article.biz === biz && imported.status.local_article.id === article.id;
+        if (!isAccountView() || !(options.fromTask || verifiedImported || state.localStatus && state.localStatus.articleIds.has(article.id) || state.localLibrary.some((item) => item.id === article.id))) return;
+        const request = ++state.readerRequest;
+        const timeLabel = article.id.startsWith("local_") ? "本地保存于 " : "发布于 ";
+        leaveNoticeScope();
+        state.readerReturnScroll = Number.isFinite(options.returnScroll) ? options.returnScroll : mainScrollTop();
+        state.readerReturnView = options.returnView || "";
+        state.readerArticle = article;
+        ui.readerBack.textContent = state.readerReturnView === "downloads" ? "← 返回下载中心" : "← 返回文章列表";
+        setReaderLink(readerArticleURL(article));
+        ui.readerTitle.textContent = displayArticleTitle(article.title) || "未命名文章";
+        ui.readerMeta.textContent = timeLabel + dateText(article.published) + " · 正在读取本地 Markdown…";
+        setReaderContent("<p>正在读取本地文章…</p>");
+        renderNavigation();
+        ui.mainPane.scrollTop = 0;
+        try {
+          const data = await api("/api/desktop/article?biz=" + encodeURIComponent(biz) + "&id=" + encodeURIComponent(article.id));
+          if (request !== state.readerRequest || state.selected !== biz || state.readerArticle !== article) return;
+          if (!data || typeof data.html !== "string") throw new Error("本地文章格式错误");
+          if (data.url) setReaderLink(data.url);
+          ui.readerTitle.textContent = displayArticleTitle(data.title || article.title) || "未命名文章";
+          ui.readerMeta.textContent = timeLabel + dateText(data.published || article.published) + " · 已从本地 Markdown 读取";
+          setReaderContent(data.html);
+        } catch (error) {
+          if (request !== state.readerRequest || state.selected !== biz || state.readerArticle !== article) return;
+          ui.readerMeta.textContent = "本地文章读取失败";
+          setReaderContent("<p>无法读取这篇文章。请返回文章列表，核对本地文件后重试。</p>");
+          showNotice("打开本地文章失败：" + errorText(error), true);
+        }
+      }
+      function closeReader(restoreScroll = true, returnToOrigin = true) {
+        if (!state.readerArticle) return;
+        const returnView = state.readerReturnView, returnScroll = state.readerReturnScroll;
+        leaveNoticeScope();
+        state.readerArticle = null;
+        state.readerReturnView = "";
+        state.readerLink = "";
+        state.readerRequest++;
+        state.readerDocumentVersion++;
+        clearReaderCopyTimers();
+        ui.readerFrame.srcdoc = "";
+        if (returnToOrigin && returnView === "downloads") {
+          selectView("downloads");
+          if (restoreScroll) scrollMainTo(returnScroll);
+          return;
+        }
+        renderNavigation();
+        if (restoreScroll) scrollMainTo(returnScroll);
+      }
+      function renderArticles() {
+        const articles = visibleArticles(); const total = articles.length;
+        const pages = Math.max(1, Math.ceil(total / ARTICLE_PAGE_SIZE)); state.articlePage = Math.min(state.articlePage, pages);
+        ui.articleCount.textContent = total + " 篇" + (total !== (state.scan.articles || []).length ? "（搜索结果）" : "");
+        clear(ui.articleList);
+        if (!total) {
+          const empty = node("div", "empty");
+          const hasScan = (state.scan.articles || []).length > 0;
+          empty.append(node("strong", "", hasScan ? "没有匹配的文章" : state.localLibrary.length ? "历史列表尚无文章" : "文章会出现在这里"), document.createTextNode(hasScan ? "试试更短的关键词。" : state.localLibrary.length ? "已下载的本地文档在上方，可直接阅读。" : "选择范围并点击“读取文章”。"));
+          ui.articleList.append(empty);
+        } else {
+          const start = (state.articlePage - 1) * ARTICLE_PAGE_SIZE;
+          const fragment = document.createDocumentFragment();
+          for (const article of articles.slice(start, start + ARTICLE_PAGE_SIZE)) {
+            const row = node("div", "article-row");
+            const checkbox = node("input"); checkbox.type = "checkbox"; checkbox.checked = state.selectedIds.has(article.id); checkbox.setAttribute("aria-label", "选择文章：" + (displayArticleTitle(article.title) || "未命名文章"));
+            checkbox.addEventListener("change", () => { if (checkbox.checked) state.selectedIds.add(article.id); else state.selectedIds.delete(article.id); renderSelectionCount(); });
+            const downloaded = !!(state.localStatus && state.localStatus.articleIds.has(article.id));
+            const main = node("div", "article-main");
+            const title = downloaded ? node("button", "article-title article-title-button", displayArticleTitle(article.title) || "未命名文章") : node("span", "article-title", displayArticleTitle(article.title) || "未命名文章");
+            if (downloaded) { title.type = "button"; title.title = "阅读本地 Markdown"; title.addEventListener("click", () => openReader(article)); }
+            main.append(title, node("span", "article-digest", article.digest || "公众号文章"));
+            if (state.localStatus) {
+              main.append(node("span", "article-local-status" + (downloaded ? " downloaded" : ""), downloaded ? "✓ 已下载到本地" : "未下载"));
+            }
+            const date = node("span", "article-date", dateText(article.published));
+            row.append(checkbox, main, date);
+            fragment.append(row);
+          }
+          ui.articleList.append(fragment);
+        }
+        ui.articlePager.hidden = total <= ARTICLE_PAGE_SIZE;
+        ui.articlePageText.textContent = "第 " + state.articlePage + " / " + pages + " 页";
+        ui.articlePrev.disabled = state.articlePage <= 1; ui.articleNext.disabled = state.articlePage >= pages;
+        renderSelectionCount();
+      }
+      async function copyArticleLink(url) {
+        const noticeEpoch = state.noticeEpoch;
+        if (!url) return;
+        try { await navigator.clipboard.writeText(url); showNotice("文章链接已复制", false, noticeEpoch); }
+        catch (_) { showNotice("无法复制链接，请检查剪贴板权限", true, noticeEpoch); }
+      }
+      function setQueueState(message, isError = false) { ui.queueState.textContent = message; ui.queueState.classList.toggle("error", isError); }
+      function batchId() { return window.crypto && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(16).slice(2); }
+      function isVerificationError(message) { return /访问验证|凭证已失效/.test(String(message || "")); }
+      function missingArticleSignature(article) {
+        try {
+          const url = new URL(String(article.url || ""));
+          return url.hostname === "mp.weixin.qq.com" && url.pathname === "/s" && url.searchParams.has("__biz") && !url.searchParams.has("chksm");
+        } catch (_) { return false; }
+      }
+      async function preflightEndpoints(articles) {
+        const blocked = new Set(), checked = new Set(), errors = [];
+        for (const article of [articles[0], articles[articles.length - 1]]) {
+          if (state.cancelQueue) break;
+          if (!article || checked.has(article)) continue;
+          checked.add(article);
+          try { await api("/api/mp/article/probe", { URL: article.url }, { timeout: 60000 }); }
+          catch (error) { blocked.add(article); errors.push(error); }
+        }
+        if (state.cancelQueue) return [];
+        if (blocked.size === checked.size) {
+          // Endpoint failures can be specific to those articles. Check a
+          // middle article before deciding whether the batch can begin.
+          const middle = articles[Math.floor((articles.length - 1) / 2)];
+          if (middle && !checked.has(middle)) {
+            checked.add(middle);
+            try { await api("/api/mp/article/probe", { URL: middle.url }, { timeout: 60000 }); }
+            catch (error) { blocked.add(middle); errors.push(error); }
+          }
+          if (state.cancelQueue) return [];
+          if (blocked.size === checked.size) {
+            if (errors.every((error) => isVerificationError(errorText(error)))) {
+              const target = checked.size === 1 ? "这篇文章" : checked.size === 2 ? "最近和最早的文章" : "抽查的文章";
+              throw new Error("微信验证拦截了" + target + "，0 篇入队。请在电脑微信重新打开该公众号文章后重试。");
+            }
+            throw new Error("所检查的文章均未通过访问检查，0 篇入队。");
+          }
+        }
+        return articles.filter((article) => !blocked.has(article));
+      }
+      async function observedChunkTasks(batch, chunk, ids) {
+        const wanted = new Set(ids), found = new Map();
+        for (let page = 1; page <= 10; page++) {
+          const data = await api("/api/task/list?status=all&page=" + page + "&page_size=1000");
+          if (!data || !Array.isArray(data.list)) throw new Error("任务列表响应格式错误");
+          for (const task of data.list) {
+            if (!task) continue;
+            const labels = task.meta && task.meta.req && task.meta.req.labels || {};
+            if (wanted.size ? wanted.has(task.id) : labels.batch_id === batch && labels.queue_chunk === chunk) found.set(task.id, task);
+          }
+          if (wanted.size && found.size >= wanted.size || page * 1000 >= Number(data.total || 0)) break;
+        }
+        return [...found.values()];
+      }
+      async function waitForChunkOutcome(batch, chunk, ids, created, pilot) {
+        const required = pilot ? created : Math.min(created, 3);
+        const deadline = Date.now() + 180000;
+        while (!state.cancelQueue) {
+          const tasks = await observedChunkTasks(batch, chunk, ids);
+          if (tasks.some((task) => isVerificationError(task.error))) return "verification";
+          if (tasks.some((task) => task.status === "pause")) return "paused";
+          const successful = tasks.filter((task) => task.status === "done" && task.files_exist === true).length;
+          const failed = tasks.filter((task) => task.status === "error" || task.status === "done" && task.files_exist === false).length;
+          if (successful + failed >= required) return successful > 0 ? "progress" : "failed";
+          if (Date.now() >= deadline) return "waiting";
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+        return "cancelled";
+      }
+      async function enqueue(selectedOnly) {
+        const account = currentAccount(); if (!account || state.queueBusy) return;
+        const noticeEpoch = state.noticeEpoch;
+        const selectedIds = new Set(state.selectedIds);
+        const queueState = (message, isError = false) => { if (state.noticeEpoch === noticeEpoch && state.selected === account.biz) setQueueState(message, isError); };
+        const originalTotal = (state.scan.articles || []).length;
+        let articles = (state.scan.articles || []).filter((article) => !selectedOnly || selectedIds.has(article.id));
+        if (!articles.length) { showNotice("请先选择文章", true); return; }
+        const local = state.localStatus && state.localStatus.total === originalTotal ? state.localStatus : null;
+        if (local) articles = articles.filter((article) => !local.articleIds.has(article.id));
+        if (!articles.length) { showNotice(selectedOnly ? "所选文章已下载到本地" : "该公众号文章已全部下载到本地"); return; }
+        state.queueBusy = true; state.cancelQueue = false; ui.queueStop.disabled = false; renderQueueButtons(); renderScanState();
+        let created = 0, skipped = 0, failed = 0, blocked = 0, attempted = 0, preflightSkipped = 0;
+        try {
+          if (state.scanSource === "wechat" && articles.some(missingArticleSignature)) {
+            queueState("正在从微信历史记录补全文章链接…");
+            const repaired = await api("/api/desktop/scan/repair", { biz: account.biz }, { timeout: 120000 });
+            if (!repaired || !repaired.scan || !Array.isArray(repaired.scan.articles)) throw new Error("文章链接更新结果无效");
+            if (repaired.scan.articles.length !== originalTotal) throw new Error("文章链接更新数量不一致，下载已停止");
+            articles = repaired.scan.articles.filter((article) => (!selectedOnly || selectedIds.has(article.id)) && (!local || !local.articleIds.has(article.id)));
+            if (state.noticeEpoch === noticeEpoch && state.selected === account.biz) { state.scan = repaired.scan; rememberDownloadScan(account.biz, repaired.scan); renderScanState(); renderArticles(); }
+          }
+          if (state.cancelQueue) { queueState("已停止添加任务，尚未创建任务。"); return; }
+          const ordered = articles.slice().sort((a, b) => Number(b.published || 0) - Number(a.published || 0));
+          queueState("正在检查最近和最早的文章…");
+          const ready = await preflightEndpoints(ordered);
+          if (state.cancelQueue) { queueState("已停止添加任务，尚未创建任务。"); return; }
+          preflightSkipped = ordered.length - ready.length;
+          const id = batchId(), started = String(Date.now()), dir = safeName(account.nickname);
+          const labels = { batch_id: id, batch_started_at: started, account_name: String(account.nickname || ""), account_biz: account.biz, download_mode: state.mode };
+          let stopReason = "";
+          for (let start = 0; start < ready.length;) {
+            if (state.cancelQueue) break;
+            const chunkIndex = String(start), pilot = start === 0;
+            const chunkArticles = ready.slice(start, start + (pilot ? 3 : 50));
+            const chunk = chunkArticles.map((article) => ({ URL: "officialaccount://" + article.url, Filename: safeName(article.title) + "-" + article.id + ".html", Dir: dir, on_exists: "skip", Extra: { ...labels, article_title: String(article.title || ""), queue_chunk: chunkIndex } }));
+            queueState("正在添加 " + (start + 1) + "–" + (start + chunk.length) + "/" + ready.length + " 篇，等待真实下载结果…");
+            const result = await api("/api/desktop/queue", chunk, { timeout: 90000 });
+            if (!result || !["created", "skipped", "failed"].every((key) => Number.isInteger(result[key]) && result[key] >= 0) || result.blocked != null && (!Number.isInteger(result.blocked) || result.blocked < 0)) throw new Error("下载队列响应格式错误");
+            const chunkBlocked = Number(result.blocked || 0);
+            if (result.created + result.skipped + result.failed + chunkBlocked !== chunk.length) throw new Error("下载队列计数不匹配，请到下载中心核对已添加的任务");
+            created += result.created; skipped += result.skipped; failed += result.failed; blocked += chunkBlocked;
+            attempted += chunk.length; start += chunk.length;
+            if (result.verification_required || chunkBlocked) { stopReason = "微信访问验证已拦截下载，已停止继续添加。"; break; }
+            if (result.created) {
+              const ids = Array.isArray(result.created_ids) && result.created_ids.length === result.created ? result.created_ids : [];
+              const outcome = await waitForChunkOutcome(id, chunkIndex, ids, result.created, pilot);
+              if (outcome === "verification") { stopReason = "真实下载触发微信访问验证，已停止继续添加。"; break; }
+              if (outcome === "paused") { stopReason = "已有任务暂停，已停止继续添加。"; break; }
+              if (outcome === "failed") { stopReason = "本批已观察到的下载均失败，已停止继续添加。"; break; }
+              if (outcome === "waiting") { stopReason = "等待下载结果超时，已停止继续添加；已入队任务仍会运行。"; break; }
+              if (outcome === "cancelled") break;
+            }
+            queueState("已加入队列 " + created + " 篇；已检查 " + attempted + "/" + ready.length + " 篇。", failed > 0 || blocked > 0);
+          }
+          const remaining = ready.length - attempted;
+          const outcome = (state.cancelQueue ? "已停止添加任务。" : stopReason || "任务添加完成。") + "已入队 " + created + "，已有 " + skipped + "，添加失败 " + failed + "，预检跳过 " + preflightSkipped + "，验证拦截 " + blocked + "，尚未提交 " + remaining + "。已入队不代表下载完成，请到下载中心查看结果。";
+          queueState(outcome, !!stopReason || failed > 0 || blocked > 0 || preflightSkipped > 0);
+          if (state.noticeEpoch === noticeEpoch && state.selected === account.biz) {
+            let resultEpoch = noticeEpoch;
+            if (created || skipped) { selectView("downloads"); resultEpoch = state.noticeEpoch; await refreshDownloads(true); }
+            showNotice(outcome, !!stopReason || failed > 0 || blocked > 0 || preflightSkipped > 0, resultEpoch);
+          }
+        } catch (error) {
+          const message = (created ? "部分任务已入队（" + created + " 篇）；后续添加已停止：" : "尚未开始下载：") + errorText(error);
+          queueState(message, true);
+          if (state.noticeEpoch === noticeEpoch && state.selected === account.biz) {
+            let resultEpoch = noticeEpoch;
+            if (created || skipped) { selectView("downloads"); resultEpoch = state.noticeEpoch; await refreshDownloads(true); }
+            showNotice(message, true, resultEpoch);
+          }
+        }
+        finally { state.queueBusy = false; ui.queueStop.disabled = false; renderScanState(); renderQueueButtons(); }
+      }
+
+      function relativeSubdir(path) {
+        if (!state.downloadDir || !path) return null;
+        const root = String(state.downloadDir).replace(/\\/g, "/").replace(/\/+$/, "");
+        const target = String(path).replace(/\\/g, "/").replace(/\/+$/, "");
+        const lowerRoot = root.toLocaleLowerCase(), lowerTarget = target.toLocaleLowerCase();
+        if (lowerTarget === lowerRoot) return "";
+        if (!lowerTarget.startsWith(lowerRoot + "/")) return null;
+        const relative = target.slice(root.length + 1);
+        return relative.split("/").some((part) => part === ".." || part === "." || !part) ? null : relative;
+      }
+      async function openDirectory(subdir = "") {
+        const noticeEpoch = state.noticeEpoch;
+        try { await api("/api/open_download_dir", { subdir }, { expectData: false }); }
+        catch (error) { showNotice(errorText(error), true, noticeEpoch); }
+      }
+      function openAccountDirectory() {
+        const account = currentAccount(); if (!account) return;
+        const localPath = state.localStatus && state.localStatus.downloadDir;
+        const actual = localPath ? relativeSubdir(localPath) : null;
+        openDirectory(actual === null ? safeName(account.nickname) : actual);
+      }
+      function downloadFolderName(path) {
+        return String(path || "").replace(/\\/g, "/").split("/").filter(Boolean).pop() || "";
+      }
+      function articleLinkIdentity(raw) {
+        const value = String(raw || "").replace(/^officialaccount:\/\//i, "").trim();
+        try {
+          const url = new URL(value);
+          if (url.hostname.toLowerCase() !== "mp.weixin.qq.com") return null;
+          url.hash = "";
+          return { href: url.href, biz: url.searchParams.get("__biz") || "", mid: url.searchParams.get("mid") || "", idx: url.searchParams.get("idx") || "" };
+        } catch (_) { return null; }
+      }
+      function taskLabels(task) { return task && task.meta && task.meta.req && task.meta.req.labels || {}; }
+      function taskOptions(task) { return task && task.meta && task.meta.opts || {}; }
+      function taskAccountName(task) {
+        const labels = taskLabels(task), path = taskOptions(task).path;
+        return String(labels.account_name || "").trim() || downloadFolderName(path) || "未知公众号";
+      }
+      function taskAccountBiz(task) {
+        const labels = taskLabels(task);
+        const labeled = String(labels.account_biz || "").trim();
+        if (labeled) return labeled;
+        const link = articleLinkIdentity(task && task.meta && task.meta.req && task.meta.req.url);
+        if (link && link.biz) return link.biz;
+        const name = taskAccountName(task);
+        const matches = state.accounts.filter((account) => String(account.nickname || "").trim() === name || safeName(account.nickname) === name);
+        return matches.length === 1 ? String(matches[0].biz || "") : "";
+      }
+      function rememberDownloadScan(biz, scan) {
+        if (!biz || !scan || !Array.isArray(scan.articles)) return;
+        const key = String(biz), previous = downloadScanCache.get(key), updated = Number(scan.updated || 0);
+        if (previous && Number(previous.updated || 0) > updated) return;
+        downloadScanCache.set(key, { articles: scan.articles, updated, status: scan.status, at: Date.now() });
+        state.scanSummaries.set(key, { status: scan.status, source: scan.source, error_code: scan.error_code, pages: scan.pages, article_count: scan.articles.length });
+      }
+      async function loadDownloadScan(biz) {
+        const cached = downloadScanCache.get(biz);
+        if (cached && Date.now() - cached.at < (cached.status === "complete" ? 60000 : 5000)) return cached.articles;
+        if (downloadScanRequests.has(biz)) return downloadScanRequests.get(biz);
+        const request = api("/api/desktop/scan?biz=" + encodeURIComponent(biz))
+          .then((scan) => { rememberDownloadScan(biz, scan); return downloadScanCache.get(biz)?.articles || []; })
+          .catch(() => cached ? cached.articles : [])
+          .finally(() => downloadScanRequests.delete(biz));
+        downloadScanRequests.set(biz, request);
+        return request;
+      }
+      function taskScannedTitle(task) {
+        const biz = taskAccountBiz(task), cache = downloadScanCache.get(biz);
+        const target = articleLinkIdentity(task && task.meta && task.meta.req && task.meta.req.url);
+        if (!cache || !target) return "";
+        const titles = new Set();
+        for (const article of cache.articles) {
+          const candidate = articleLinkIdentity(article && article.url);
+          if (!candidate) continue;
+          const sameArticle = target.mid && target.idx && target.mid === candidate.mid && target.idx === candidate.idx
+            && (!target.biz || !candidate.biz || target.biz === candidate.biz);
+          if (sameArticle || target.href === candidate.href) {
+            const title = String(article.title || "").trim();
+            if (title) titles.add(title);
+          }
+        }
+        return titles.size === 1 ? titles.values().next().value : "";
+      }
+      function taskDisplayTitle(task) {
+        const labels = taskLabels(task), labeled = String(labels.article_title || "").trim();
+        if (labeled) return displayArticleTitle(labeled);
+        const scanned = taskScannedTitle(task);
+        if (scanned) return displayArticleTitle(scanned);
+        const name = String(taskOptions(task).name || "").trim();
+        const withoutID = name.replace(/-[0-9a-f]{16}$/i, "");
+        const readable = String(labels.batch_total || "") === "1" ? withoutID.replace(/-[0-9a-f]{8}-[0-9a-f]{3}$/i, "") : withoutID;
+        return displayArticleTitle(readable.trim() || name) || "未命名文章";
+      }
+      async function hydrateTaskTitles(request, filter, page) {
+        const needed = [...new Set(state.tasks.filter((task) => !String(taskLabels(task).article_title || "").trim() && articleLinkIdentity(task && task.meta && task.meta.req && task.meta.req.url)).map(taskAccountBiz).filter(Boolean))];
+        for (let start = 0; start < needed.length; start += 4) {
+          await Promise.allSettled(needed.slice(start, start + 4).map(loadDownloadScan));
+          if (request !== state.downloadRequest || state.selected !== "downloads" || ui.taskFilter.value !== filter || state.taskPage !== page || state.taskDataPage !== page || state.taskDataFilter !== filter) return;
+          renderTasks();
+        }
+      }
+      function renderSummaries() {
+        clear(ui.summaryList);
+        if (!state.summaries.length) { const empty = node("div", "card empty"); empty.append(node("strong", "", "还没有下载批次"), document.createTextNode("下载公众号文章后，批次进度会显示在这里。")); ui.summaryList.append(empty); return; }
+        for (const summary of state.summaries) {
+          const card = node("div", "card summary-card"), body = node("div", "summary-body"), path = String(summary.path || "");
+          const total = Number(summary.total || 0), completed = Number(summary.completed || 0), running = Number(summary.running || 0), queued = Number(summary.queued || 0), failed = Number(summary.failed || 0), paused = Number(summary.paused || 0), missing = Number(summary.missing || 0);
+          const account = String(summary.account_name || "").trim() || downloadFolderName(path) || "未知公众号";
+          const single = total === 1, articleTitle = String(summary.article_title || "").trim();
+          const title = single ? displayArticleTitle(articleTitle) || "单篇文章" : account + " · " + total + " 篇";
+          const heading = node("div", "summary-title", title); heading.title = title;
+          const accountLine = node("div", "summary-account", "公众号：" + account);
+          if (path) accountLine.title = "目录：" + path;
+          body.append(heading, accountLine);
+          const meta = node("div", "summary-meta");
+          const parts = [completed + "/" + total + " 篇"];
+          if (running) parts.push("下载中 " + running); if (queued) parts.push("排队 " + queued); if (paused) parts.push("暂停 " + paused); if (missing) parts.push("文件缺失 " + missing);
+          if (!running && !queued && !failed && !paused && !missing && completed >= total && total) parts.push("已完成");
+          for (const part of parts) meta.append(node("span", "", part));
+          if (failed) meta.append(node("span", "failure", "失败 " + failed));
+          meta.append(node("span", "", summary.mode === "fast" ? "快速模式" : summary.mode === "safe" ? "安全模式" : ""));
+          const start = Number(summary.started_at || 0), finish = Number(summary.finished_at || 0);
+          if (start) { meta.append(node("span", "", "开始 " + dateTimeText(start))); meta.append(node("span", "", (finish ? "耗时 " : "已用时 ") + durationText((finish || Date.now()) - start))); }
+          body.append(meta);
+          if (total) { const track = node("div", "progress-track"), fill = node("div", "progress-fill"); fill.style.width = Math.max(0, Math.min(100, completed / total * 100)) + "%"; track.append(fill); body.append(track); }
+          const button = node("button", "button small", "打开目录"); button.type = "button";
+          const subdir = relativeSubdir(path); button.disabled = subdir === null; button.title = subdir === null ? "目录不在当前下载根目录内" : "";
+          button.addEventListener("click", () => openDirectory(subdir));
+          card.append(node("div", "folder-icon", "▣"), body, button); ui.summaryList.append(card);
+        }
+      }
+      function taskStatus(task) { if (task.status === "done" && task.files_exist === false) return "文件不完整"; return { done: "已完成", running: "下载中", wait: "排队中", ready: "准备中", pause: "已暂停", error: "下载失败" }[task.status] || String(task.status || "未知状态"); }
+      async function openTaskReader(task) {
+        const target = task && task.local_article;
+        if (state.selected !== "downloads" || task.status !== "done" || !target || typeof target.biz !== "string" || typeof target.id !== "string" || !target.biz || !target.id) return;
+        const returnScroll = mainScrollTop();
+        selectView(target.biz);
+        await openReader({ id: target.id, title: String(target.title || taskDisplayTitle(task)), published: Number(target.published || 0) }, { fromTask: true, returnView: "downloads", returnScroll });
+      }
+      function renderTasks() {
+        clear(ui.taskList);
+        if (!state.tasks.length) ui.taskList.append(node("div", "empty", "当前筛选下没有文章任务。"));
+        for (const task of state.tasks) {
+          const row = node("div", "task-row"), main = node("div", "task-main"), opts = task.meta && task.meta.opts || {}, path = String(opts.path || "");
+          const title = taskDisplayTitle(task);
+          const readable = task.status === "done" && task.files_exist === true && task.local_article && typeof task.local_article.biz === "string" && typeof task.local_article.id === "string";
+          const titleNode = node(readable ? "button" : "span", "task-title" + (readable ? " task-title-button" : ""), title);
+          titleNode.title = readable ? "阅读本地 Markdown：" + title : title;
+          if (readable) { titleNode.type = "button"; titleNode.addEventListener("click", () => openTaskReader(task)); }
+          const accountNode = node("div", "task-account", "公众号：" + taskAccountName(task));
+          if (path) accountNode.title = "目录：" + path;
+          main.append(titleNode, accountNode);
+          if (task.error) main.append(node("div", "task-error", task.error));
+          const status = node("span", "task-status" + (task.status === "error" || task.status === "done" && task.files_exist === false ? " error" : ""), taskStatus(task));
+          const actions = node("div", "task-actions");
+          if (["ready", "wait", "running"].includes(task.status)) { const pause = node("button", "button small", "暂停"); pause.type = "button"; pause.addEventListener("click", () => taskAction("pause", task.id)); actions.append(pause); }
+          if (["pause", "error"].includes(task.status)) { const resume = node("button", "button small", "继续"); resume.type = "button"; resume.addEventListener("click", () => taskAction("resume", task.id)); actions.append(resume); }
+          const subdir = relativeSubdir(path);
+          if (subdir !== null) { const open = node("button", "button small", "打开目录"); open.type = "button"; open.addEventListener("click", () => openDirectory(subdir)); actions.append(open); }
+          row.append(main, status, actions); ui.taskList.append(row);
+        }
+        const pages = Math.max(1, Math.ceil(state.taskTotal / TASK_PAGE_SIZE)); state.taskPage = Math.min(state.taskPage, pages);
+        ui.taskPager.hidden = state.taskTotal <= TASK_PAGE_SIZE;
+        ui.taskPageText.textContent = "共 " + state.taskTotal + " 项 · 第 " + state.taskPage + " / " + pages + " 页";
+        ui.taskPrev.disabled = state.taskPage <= 1; ui.taskNext.disabled = state.taskPage >= pages;
+      }
+      async function refreshDownloads(showError = false) {
+        if (state.selected !== "downloads") return;
+        const request = ++state.downloadRequest, filter = ui.taskFilter.value, page = state.taskPage;
+        const results = await Promise.allSettled([
+          api("/api/desktop/download-summary"),
+          api("/api/task/list?status=" + encodeURIComponent(filter) + "&page=" + page + "&page_size=" + TASK_PAGE_SIZE)
+        ]);
+        if (request !== state.downloadRequest || state.selected !== "downloads") return;
+        const [summaryResult, taskResult] = results;
+        if (summaryResult.status === "fulfilled") {
+          if (Array.isArray(summaryResult.value)) { state.summaries = summaryResult.value; renderSummaries(); }
+          else if (showError) showNotice("下载批次格式错误", true);
+        } else if (showError) showNotice(errorText(summaryResult.reason), true);
+        if (taskResult.status === "fulfilled") {
+          const data = taskResult.value;
+          if (data && Array.isArray(data.list)) { state.tasks = data.list; state.taskTotal = Number(data.total || 0); state.taskDataPage = page; state.taskDataFilter = filter; renderTasks(); void hydrateTaskTitles(request, filter, page); }
+          else if (showError) showNotice("文章任务格式错误", true);
+        } else if (showError) showNotice(errorText(taskResult.reason), true);
+        await refreshImportedStatus();
+      }
+      async function taskAction(action, id) {
+        const noticeEpoch = state.noticeEpoch;
+        try { await api("/api/task/" + action, { id }, { expectData: false }); await refreshDownloads(true); }
+        catch (error) { showNotice(errorText(error), true, noticeEpoch); }
+      }
+      async function refreshInfo(showError = false) {
+        const noticeEpoch = state.noticeEpoch;
+        try { const info = await api("/api/desktop/info"); state.downloadDir = String(info && info.download_dir || ""); renderWelcome(); }
+        catch (error) { renderWelcome(); if (showError) showNotice(errorText(error), true, noticeEpoch); }
+      }
+
+      ui.noticeClose.addEventListener("click", clearNotice);
+      ui.sidebarToggle.addEventListener("click", toggleSidebar);
+      ui.welcomeNav.addEventListener("click", () => selectView("welcome"));
+      ui.accountsNav.addEventListener("click", () => selectView("accounts"));
+      ui.downloadsNav.addEventListener("click", () => selectView("downloads"));
+      ui.catalogSearch.addEventListener("input", () => { state.catalogPage = 1; renderCatalog(); });
+      ui.catalogPrev.addEventListener("click", () => { state.catalogPage--; renderCatalog(); scrollMainTo(0); });
+      ui.catalogNext.addEventListener("click", () => { state.catalogPage++; renderCatalog(); scrollMainTo(0); });
+      ui.catalogRefresh.addEventListener("click", () => refreshAccounts(true));
+      ui.catalogImportLink.addEventListener("click", () => { selectView("welcome"); ui.importUrl.focus(); });
+      ui.welcomeFirstAccount.addEventListener("click", () => selectView("accounts"));
+      ui.welcomeRefresh.addEventListener("click", () => refreshAccounts(true));
+      ui.importForm.addEventListener("submit", importArticle);
+      ui.welcomeDownloadImported.addEventListener("click", activateImportedArticle);
+      ui.downloadImported.addEventListener("click", activateImportedArticle);
+      ui.welcomeOpenRoot.addEventListener("click", () => openDirectory());
+      ui.accountBack.addEventListener("click", () => selectView("accounts", false, true));
+      ui.accountImportLink.addEventListener("click", () => { selectView("welcome"); ui.importUrl.focus(); });
+      ui.accountOpenDir.addEventListener("click", openAccountDirectory);
+      ui.accountRefresh.addEventListener("click", () => { refreshAccounts(true); refreshScan(true); refreshLocalStatus(true); refreshLocalLibrary(true); });
+      ui.localStatusOpenDir.addEventListener("click", openAccountDirectory);
+      ui.localLibrarySearch.addEventListener("input", () => { state.localLibraryPage = 1; renderLocalLibrary(); });
+      ui.localLibraryPrev.addEventListener("click", () => { state.localLibraryPage--; renderLocalLibrary(); });
+      ui.localLibraryNext.addEventListener("click", () => { state.localLibraryPage++; renderLocalLibrary(); });
+      ui.readerBack.addEventListener("click", () => closeReader());
+      ui.readerCopyLink.addEventListener("click", () => copyArticleLink(state.readerLink));
+      ui.readerOpenDir.addEventListener("click", openAccountDirectory);
+      ui.readerFrame.addEventListener("load", enhanceReaderCodeBlocks);
+      ui.sourceWechat.addEventListener("click", () => setScanSource("wechat"));
+      ui.sourceWeread.addEventListener("click", () => setScanSource("weread"));
+      ui.wereadStart.addEventListener("click", startWereadScan);
+      ui.scanMode.addEventListener("change", renderModeFields);
+      ui.scanStart.addEventListener("click", () => startScan(false));
+      ui.scanRestart.addEventListener("click", () => startScan(false));
+      ui.scanResume.addEventListener("click", () => startScan(true));
+      ui.scanPause.addEventListener("click", pauseScan);
+      ui.articleSearch.addEventListener("input", () => { state.articlePage = 1; renderArticles(); });
+      ui.articlePrev.addEventListener("click", () => { state.articlePage--; renderArticles(); });
+      ui.articleNext.addEventListener("click", () => { state.articlePage++; renderArticles(); });
+      ui.selectFiltered.addEventListener("click", () => { for (const article of visibleArticles()) state.selectedIds.add(article.id); renderArticles(); });
+      ui.clearSelection.addEventListener("click", () => { state.selectedIds.clear(); renderArticles(); });
+      ui.downloadMode.addEventListener("change", () => { state.mode = ui.downloadMode.value === "fast" ? "fast" : "safe"; saveMode(state.mode); ui.modeHint.textContent = state.mode === "fast" ? "约每秒 2 篇；遇到持续访问验证时会暂停剩余任务。" : "每秒最多 1 篇，适合长时间、大批量归档。"; });
+      ui.queueSelected.addEventListener("click", () => enqueue(true));
+      ui.queueAll.addEventListener("click", () => enqueue(false));
+      ui.queueStop.addEventListener("click", () => { state.cancelQueue = true; ui.queueStop.disabled = true; setQueueState("正在停止添加任务，当前批次完成后会停止…"); });
+      ui.downloadsOpenRoot.addEventListener("click", () => openDirectory());
+      ui.downloadsRefresh.addEventListener("click", () => refreshDownloads(true));
+      ui.taskFilter.addEventListener("change", () => { state.taskPage = 1; refreshDownloads(true); });
+      ui.taskPrev.addEventListener("click", () => { state.taskPage--; refreshDownloads(true); });
+      ui.taskNext.addEventListener("click", () => { state.taskPage++; refreshDownloads(true); });
+      ui.scanAfter.value = localDateInput(new Date(new Date().getFullYear(), new Date().getMonth() - 1, new Date().getDate()));
+      ui.scanBefore.value = localDateInput(new Date());
+      ui.importUrl.value = "";
+      window.addEventListener("pageshow", () => { ui.importUrl.value = ""; });
+      ui.downloadMode.value = state.mode;
+      ui.modeHint.textContent = state.mode === "fast" ? "约每秒 2 篇；遇到持续访问验证时会暂停剩余任务。" : "每秒最多 1 篇，适合长时间、大批量归档。";
+      renderSidebar(); renderModeFields(); renderNavigation(); renderWelcome(); renderQueueButtons();
+      Promise.allSettled([refreshInfo(true), refreshAccounts(true)]).then(() => { renderWelcome(); });
+      setInterval(async () => { if (!isAccountView() || state.scanPolling) return; state.scanPolling = true; try { await refreshScan(); } finally { state.scanPolling = false; } }, 2500);
+      setInterval(async () => { if (!isAccountView() || state.localStatusPolling) return; state.localStatusPolling = true; try { await Promise.allSettled([refreshLocalStatus(), refreshLocalLibrary(), refreshImportedStatus()]); } finally { state.localStatusPolling = false; } }, 7000);
+      setInterval(async () => { if (state.selected !== "downloads" || state.downloadPolling) return; state.downloadPolling = true; try { await refreshDownloads(); } finally { state.downloadPolling = false; } }, 3500);
+      setInterval(() => { if (state.selected === "welcome") void refreshImportedStatus(); }, 7000);
+      setInterval(() => { refreshAccounts(); refreshInfo(); }, 12000);
+    })();
+  </script>
+</body>
+</html>

@@ -3,6 +3,7 @@ package officialaccount
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,11 +29,52 @@ import (
 
 	result "mp_article_batch_downloader/internal/util"
 	"mp_article_batch_downloader/pkg/cache"
+	"mp_article_batch_downloader/pkg/safelog"
 )
 
 var accounts = make(map[string]*OfficialAccount)
 var acct_mu sync.RWMutex
 var official_timer_once sync.Once
+var ErrAuthorHistoryUnavailable = errors.New("当前文章未提供作者历史标识，无法读取历史列表；仍可下载当前文章")
+var ErrCandidateAuthorHistoryRejected = errors.New("文章中的作者候选标识未通过公众号验证")
+var errCandidateAuthorFirstPageRejected = errors.New("微信作者列表未接受文章中的作者候选标识")
+var ErrHistoryCredentialsExpired = errors.New("公众号历史接口凭证已过期")
+var ErrHistoryCredentialsMissing = errors.New("公众号历史接口缺少会话凭证")
+var ErrHistoryNetworkFailure = errors.New("公众号历史接口网络请求失败")
+var ErrHistoryInvalidResponse = errors.New("公众号历史接口响应格式异常")
+var ErrHistoryVerificationRequired = errors.New("微信要求完成访问验证")
+var safeHistoryRemoteError = regexp.MustCompile(`^微信(?:接口|作者入口|作者列表)返回 ?(?:HTTP [1-5][0-9]{2}|错误 -?[0-9]+)$`)
+
+// Author history diagnostics intentionally accept only fixed labels. Requests
+// and errors can carry key, Cookie, author_id and signed article URLs.
+func logAuthorHistory(phase, outcome string) {
+	switch phase {
+	case "credentials", "author_show", "cookie", "articles_first", "articles_next", "candidate", "pagination":
+	default:
+		return
+	}
+	switch outcome {
+	case "missing_account", "missing_key", "missing_author", "reuse", "refresh", "network", "http_status",
+		"read_error", "verification", "received", "missing", "invalid_json", "expired_retry", "expired",
+		"remote_error", "accepted", "rejected", "empty", "nonempty", "advanced", "end", "stalled", "page_limit":
+	default:
+		return
+	}
+	fmt.Printf("[mp author] phase=%s outcome=%s\n", phase, outcome)
+}
+
+// Only parsed integer response codes are logged. Never log WeChat's errmsg,
+// the author request URL, or any session value.
+func logAuthorHistoryReturn(phase, outcome string, ret, baseRet int) {
+	if phase != "articles_first" && phase != "articles_next" {
+		return
+	}
+	if outcome != "expired_retry" && outcome != "expired" && outcome != "remote_error" {
+		return
+	}
+	fmt.Printf("[mp author] phase=%s outcome=%s ret=%d base_ret=%d\n", phase, outcome, ret, baseRet)
+}
+
 var official_ws_upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -45,21 +87,27 @@ type OfficialAccountBody struct {
 	Biz string `json:"biz"`
 }
 type OfficialAccount struct {
-	Biz              string `json:"biz"`
-	Nickname         string `json:"nickname"`
-	AvatarURL        string `json:"avatar_url"`
-	AuthorId         string `json:"author_id"`
-	Uin              string `json:"uin"`
-	Key              string `json:"key"`
-	PassTicket       string `json:"pass_ticket"`
-	AppmsgToken      string `json:"appmsg_token"`
-	Cookie           string `json:"cookie"`
-	CookieExpiration int64  `json:"cookie_expiration"`
-	RefreshUri       string `json:"refresh_uri"`
-	IsEffective      bool   `json:"is_effective"`
-	CreatedAt        int64  `json:"created_at"`
-	UpdateTime       int64  `json:"update_time"`
-	Error            string `json:"error"`
+	Biz               string `json:"biz"`
+	Nickname          string `json:"nickname"`
+	AvatarURL         string `json:"avatar_url"`
+	AuthorId          string `json:"author_id"`
+	AuthorIdVerified  bool   `json:"author_id_verified,omitempty"`
+	CandidateAuthorId string `json:"candidate_author_id,omitempty"`
+	// Populated only by a local URL import to migrate an author ID that an
+	// earlier importer extracted from an unrelated script on the same page.
+	RejectedPageAuthorId string `json:"-"`
+	Uin                  string `json:"uin"`
+	Key                  string `json:"key"`
+	PassTicket           string `json:"pass_ticket"`
+	AppmsgToken          string `json:"appmsg_token"`
+	Cookie               string `json:"cookie"`
+	CookieExpiration     int64  `json:"cookie_expiration"`
+	RefreshUri           string `json:"refresh_uri"`
+	IsEffective          bool   `json:"is_effective"`
+	CreatedAt            int64  `json:"created_at"`
+	UpdateTime           int64  `json:"update_time"`
+	HistoryValidatedAt   int64  `json:"history_validated_at,omitempty"`
+	Error                string `json:"error"`
 }
 
 type ArticleAuthCredential struct {
@@ -67,6 +115,17 @@ type ArticleAuthCredential struct {
 	Key        string
 	PassTicket string
 	Cookie     string
+}
+
+func hasAuthorHistoryCredentials(acct *OfficialAccount) bool {
+	return acct != nil && strings.TrimSpace(acct.Key) != "" &&
+		(strings.TrimSpace(acct.AuthorId) != "" || strings.TrimSpace(acct.CandidateAuthorId) != "")
+}
+
+func (c *OfficialAccountClient) HasAuthorHistoryCredentials(biz string) bool {
+	acct_mu.RLock()
+	defer acct_mu.RUnlock()
+	return hasAuthorHistoryCredentials(accounts[biz])
 }
 
 func (acct *OfficialAccount) MergeFrom(source *OfficialAccount) {
@@ -77,7 +136,13 @@ func (acct *OfficialAccount) MergeFrom(source *OfficialAccount) {
 		acct.AvatarURL = source.AvatarURL
 	}
 	if source.AuthorId != "" {
+		if acct.AuthorId != source.AuthorId {
+			acct.AuthorIdVerified = false
+		}
 		acct.AuthorId = source.AuthorId
+	}
+	if source.CandidateAuthorId != "" {
+		acct.CandidateAuthorId = source.CandidateAuthorId
 	}
 	if source.Uin != "" {
 		acct.Uin = source.Uin
@@ -126,6 +191,7 @@ func (c *OfficialAccountClient) ArticleAuthCredential(biz string) ArticleAuthCre
 
 type OfficialAccountClient struct {
 	logger                    *zerolog.Logger
+	authorHTTPClient          *http.Client
 	RemoteServerAddr          string
 	RefreshToken              string
 	APIServerProtocol         string
@@ -427,14 +493,43 @@ func (c *OfficialAccountClient) HandleFetchArticleList(ctx *gin.Context) {
 	biz := ctx.Query("biz")
 	if biz == "" {
 		result.ErrCode(ctx, result.CodeInvalidParams)
+		return
 	}
 	data, err := c.fetchArticleList(biz, ctx.Query("from_article_id"))
 	if err != nil {
-		code := result.CodeFetchMsgFailed
-		result.Err(ctx, code, "fetch article failed")
+		result.Err(ctx, result.CodeFetchMsgFailed, authorHistoryUserMessage(err))
 		return
 	}
 	result.Ok(ctx, data)
+}
+
+func authorHistoryUserMessage(err error) string {
+	if errors.Is(err, errCandidateAuthorFirstPageRejected) {
+		return "微信本次未返回可确认的作者文章列表。可稍后重试，或导入同公众号的另一篇文章"
+	}
+	if errors.Is(err, ErrCandidateAuthorHistoryRejected) {
+		return "当前文章的作者标识不属于这个公众号，无法用它读取历史。请从电脑微信打开该公众号的其他文章后重试"
+	}
+	kind, detail := ClassifyHistoryError(err)
+	switch kind {
+	case "credentials_missing":
+		return "缺少微信历史会话凭证。请从电脑微信重新打开文章后重试"
+	case "credentials_expired":
+		return "微信历史会话已失效。请在电脑微信重新打开文章并完成验证后重试"
+	case "verification_required":
+		return "微信要求访问验证。请在电脑微信完成验证后重试"
+	case "history_unavailable":
+		return "当前文章没有可用的作者历史入口；仍可保存当前文章"
+	case "network":
+		return "微信作者列表网络请求失败：" + detail
+	case "invalid_response":
+		return "微信作者列表返回了无法解析的数据，请稍后重试"
+	case "remote_error":
+		if detail != "" {
+			return detail + "；请从电脑微信重新打开文章后重试"
+		}
+	}
+	return "微信作者列表读取失败，请稍后重试"
 }
 
 // 获取已添加到公众号列表
@@ -465,23 +560,28 @@ func (c *OfficialAccountClient) HandleFetchList(ctx *gin.Context) {
 	}
 
 	type SafeOfficialAccount struct {
-		Biz         string `json:"biz"`
-		Nickname    string `json:"nickname"`
-		AvatarURL   string `json:"avatar_url"`
-		IsEffective bool   `json:"is_effective"`
-		CreatedAt   int64  `json:"created_at"`
-		UpdateTime  int64  `json:"update_time"`
-		Error       string `json:"error"`
-		RefreshUri  string `json:"refresh_uri,omitempty"`
-		Links       []Link `json:"links"`
+		Biz                       string `json:"biz"`
+		Nickname                  string `json:"nickname"`
+		AvatarURL                 string `json:"avatar_url"`
+		IsEffective               bool   `json:"is_effective"`
+		HistoryCredentialsPresent bool   `json:"history_credentials_present"`
+		CreatedAt                 int64  `json:"created_at"`
+		UpdateTime                int64  `json:"update_time"`
+		Error                     string `json:"error"`
+		RefreshUri                string `json:"refresh_uri,omitempty"`
+		Links                     []Link `json:"links"`
 	}
 	var list []SafeOfficialAccount
 	now := time.Now().Unix()
 	changed := false
 	acct_mu.Lock()
 	for _, acct := range accounts {
-		if acct != nil && acct.UpdateTime > 0 {
-			if now-acct.UpdateTime > 30*60 {
+		if acct != nil {
+			lastConfirmed := acct.UpdateTime
+			if acct.HistoryValidatedAt > lastConfirmed {
+				lastConfirmed = acct.HistoryValidatedAt
+			}
+			if lastConfirmed > 0 && now-lastConfirmed > 30*60 {
 				if acct.IsEffective {
 					changed = true
 				}
@@ -489,13 +589,14 @@ func (c *OfficialAccountClient) HandleFetchList(ctx *gin.Context) {
 			}
 		}
 		summary := SafeOfficialAccount{
-			Biz:         acct.Biz,
-			Nickname:    acct.Nickname,
-			AvatarURL:   acct.AvatarURL,
-			IsEffective: acct.IsEffective,
-			CreatedAt:   acct.CreatedAt,
-			UpdateTime:  acct.UpdateTime,
-			Error:       acct.Error,
+			Biz:                       acct.Biz,
+			Nickname:                  acct.Nickname,
+			AvatarURL:                 acct.AvatarURL,
+			IsEffective:               acct.IsEffective,
+			HistoryCredentialsPresent: strings.TrimSpace(acct.Key) != "" && strings.TrimSpace(acct.Uin) != "" || hasAuthorHistoryCredentials(acct),
+			CreatedAt:                 acct.CreatedAt,
+			UpdateTime:                acct.UpdateTime,
+			Error:                     acct.Error,
 		}
 		if !c.RemoteMode {
 			summary.RefreshUri = acct.RefreshUri
@@ -693,13 +794,60 @@ func (c *OfficialAccountClient) HandleRefreshEvent(ctx *gin.Context) {
 		Str("nickname", body.Nickname).
 		Logger()
 	logger.Info().Msg("refresh official account event: received")
+	target_acct, ok := c.storeAccount(body)
+	logger.Info().
+		Bool("has_waiter", ok).
+		Bool("remote_mode", c.RemoteMode).
+		Msg("refresh official account event: stored and notified")
+	is_manually_refresh := !ok
+	if is_manually_refresh && !c.RemoteMode {
+		// 这里是手动刷新页面时，主动向远端服务推送凭证。所以如果是远端服务，不能向自己推，就循环了
+		go c.pushCredentialToRemoteServer(logger, target_acct)
+	}
+	result.Ok(ctx, nil)
+}
+
+// storeAccount is shared by the injected-page refresh event and local URL import.
+// Credentials from different WeChat sessions must never be combined.
+func (c *OfficialAccountClient) storeAccount(body OfficialAccount) (*OfficialAccount, bool) {
 	now := time.Now().Unix()
+	// This proof is established only after the history endpoint has returned a
+	// complete, account-checked list. Do not accept it from an import payload.
+	body.AuthorIdVerified = false
+	body.HistoryValidatedAt = 0
 	acct_mu.Lock()
 	var target_acct *OfficialAccount
 	if old, exists := accounts[body.Biz]; exists {
 		// copy old account to avoid data race on reading fields
 		new_acct := *old
+		sessionChanged := body.Key != "" && body.Key != old.Key ||
+			body.Uin != "" && old.Uin != "" && body.Uin != old.Uin ||
+			body.PassTicket != "" && old.PassTicket != "" && body.PassTicket != old.PassTicket
+		if sessionChanged {
+			// An article URL may carry only a subset of the session. Inheriting the
+			// missing fields would make a plausible-looking but invalid request.
+			new_acct.Uin = ""
+			new_acct.PassTicket = ""
+			new_acct.AppmsgToken = ""
+			new_acct.Cookie = ""
+			new_acct.CookieExpiration = 0
+			new_acct.HistoryValidatedAt = 0
+			// A verified author ID identifies the account, not the WeChat
+			// session. Keep that proof when a new article only refreshes the key.
+			if !new_acct.AuthorIdVerified {
+				new_acct.AuthorId = ""
+			}
+			new_acct.CandidateAuthorId = ""
+			new_acct.RefreshUri = ""
+		}
+		if !sessionChanged && body.AuthorId == "" && body.RejectedPageAuthorId != "" &&
+			new_acct.AuthorId == body.RejectedPageAuthorId && !new_acct.AuthorIdVerified {
+			new_acct.AuthorId = ""
+		}
 		new_acct.MergeFrom(&body)
+		if new_acct.AuthorId != old.AuthorId {
+			new_acct.HistoryValidatedAt = 0
+		}
 		if new_acct.AuthorId == "" && body.AuthorId != "" {
 			new_acct.AuthorId = body.AuthorId
 		}
@@ -736,16 +884,7 @@ func (c *OfficialAccountClient) HandleRefreshEvent(ctx *gin.Context) {
 		}
 	}
 	c.wait_mu.Unlock()
-	logger.Info().
-		Bool("has_waiter", ok).
-		Bool("remote_mode", c.RemoteMode).
-		Msg("refresh official account event: stored and notified")
-	is_manually_refresh := !ok
-	if is_manually_refresh && !c.RemoteMode {
-		// 这里是手动刷新页面时，主动向远端服务推送凭证。所以如果是远端服务，不能向自己推，就循环了
-		go c.pushCredentialToRemoteServer(logger, target_acct)
-	}
-	result.Ok(ctx, nil)
+	return target_acct, ok
 }
 
 func (c *OfficialAccountClient) HandleRefreshAllRemoteOfficialAccount(ctx *gin.Context) {
@@ -1211,7 +1350,7 @@ func (c *OfficialAccountClient) HandleOfficialAccountProxy(ctx *gin.Context) {
 	// }
 	// 处理 HTML 实体编码，例如 &amp; 转为 &
 	targetURL = strings.ReplaceAll(targetURL, "&amp;", "&")
-	fmt.Println("[Proxy] Requesting:", targetURL)
+	fmt.Println("[Proxy] Requesting:", safelog.Redact(targetURL))
 
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", targetURL, nil)
@@ -2124,6 +2263,57 @@ func codedErrorOf(err error) (int, string, string, bool) {
 	return 0, "", "", false
 }
 
+// ClassifyHistoryError returns only controlled, credential-free diagnostics for
+// the desktop archive. The underlying HTTP error may contain a signed URL, so
+// neither it nor WeChat's untrusted errmsg is sent to the scan state.
+func ClassifyHistoryError(err error) (kind, detail string) {
+	if err == nil {
+		return "", ""
+	}
+	if errors.Is(err, errCandidateAuthorFirstPageRejected) {
+		return "candidate_unverified", ""
+	}
+	if errors.Is(err, ErrAuthorHistoryUnavailable) {
+		return "history_unavailable", ""
+	}
+	if errors.Is(err, ErrHistoryCredentialsExpired) {
+		return "credentials_expired", ""
+	}
+	if errors.Is(err, ErrHistoryCredentialsMissing) {
+		return "credentials_missing", ""
+	}
+	if errors.Is(err, ErrHistoryVerificationRequired) {
+		return "verification_required", ""
+	}
+	if errors.Is(err, ErrHistoryNetworkFailure) {
+		var ce *codedError
+		if errors.As(err, &ce) && ce.err != nil {
+			return "network", safeNetReason(ce.err)
+		}
+		return "network", "网络请求失败"
+	}
+	if errors.Is(err, ErrHistoryInvalidResponse) {
+		return "invalid_response", ""
+	}
+	var ce *codedError
+	if errors.As(err, &ce) {
+		switch ce.code {
+		case result.CodeAccountExpired:
+			return "credentials_expired", ""
+		case result.CodeAccountBanned:
+			return "remote_error", "微信限制了历史接口访问"
+		case result.CodeTimeout:
+			return "network", result.GetMsg(result.CodeTimeout)
+		case result.CodeDataParseFailed:
+			return "invalid_response", ""
+		}
+	}
+	if safeHistoryRemoteError.MatchString(err.Error()) {
+		return "remote_error", err.Error()
+	}
+	return "remote_error", ""
+}
+
 func safeLogErr(err error) string {
 	if err == nil {
 		return ""
@@ -2197,27 +2387,79 @@ type ArticleHistoryResponse struct {
 	Pages    int       `json:"pages"`
 }
 
-func (c *OfficialAccountClient) fetchCookie(acct *OfficialAccount) error {
-	u := fmt.Sprintf("https://mp.weixin.qq.com/mp/author?action=show&__biz=%s&idx=1&scene=142&rscene=128&uin=%s&key=%s&devicetype=UnifiedPCMac&version=f2640619&lang=zh_CN&ascene=1&acctmode=0&pass_ticket=%s&countrycode=CN",
-		acct.Biz, acct.Uin, acct.Key, acct.PassTicket)
+func authorShowURL(acct *OfficialAccount, authorID string) string {
+	u := url.URL{Scheme: "https", Host: "mp.weixin.qq.com", Path: "/mp/author"}
+	q := u.Query()
+	q.Set("action", "show")
+	q.Set("__biz", acct.Biz)
+	q.Set("idx", "1")
+	q.Set("author_id", authorID)
+	q.Set("scene", "142")
+	q.Set("rscene", "128")
+	q.Set("uin", acct.Uin)
+	q.Set("key", acct.Key)
+	q.Set("devicetype", "UnifiedPCMac")
+	q.Set("version", "f2640619")
+	q.Set("lang", "zh_CN")
+	q.Set("ascene", "1")
+	q.Set("acctmode", "0")
+	q.Set("pass_ticket", acct.PassTicket)
+	q.Set("countrycode", "CN")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
 
-	req, err := http.NewRequest("GET", u, nil)
+func (c *OfficialAccountClient) authorClient() *http.Client {
+	if c.authorHTTPClient != nil {
+		return c.authorHTTPClient
+	}
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			// The author-page referer contains temporary credentials.
+			if len(via) >= 3 || req.URL.Scheme != "https" || req.URL.Hostname() != "mp.weixin.qq.com" {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		},
+	}
+}
+
+var wechatVerificationTitle = regexp.MustCompile(`(?is)<title[^>]*>\s*验证\s*</title>`)
+
+func (c *OfficialAccountClient) fetchCookie(acct *OfficialAccount, authorID string) error {
+	req, err := http.NewRequest("GET", authorShowURL(acct, authorID), nil)
 	if err != nil {
-		return err
+		logAuthorHistory("author_show", "read_error")
+		return errors.New("无法构造微信作者入口请求")
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36")
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-	resp, err := client.Do(req)
+	resp, err := c.authorClient().Do(req)
 	if err != nil {
-		return err
+		logAuthorHistory("author_show", "network")
+		// net/http errors can contain the full credential-bearing request URL.
+		return newCodedError(result.CodeFetchMsgFailed, "微信作者入口网络请求失败", errors.Join(ErrHistoryNetworkFailure, err))
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		logAuthorHistory("author_show", "http_status")
+		return fmt.Errorf("微信作者入口返回 HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		logAuthorHistory("author_show", "read_error")
+		return newCodedError(result.CodeDataParseFailed, "读取微信作者入口失败", errors.Join(ErrHistoryInvalidResponse, err))
+	}
+	if wechatVerificationTitle.Match(body) || bytes.Contains(body, []byte("wappoc_appmsgcaptcha")) {
+		logAuthorHistory("author_show", "verification")
+		return fmt.Errorf("%w，请在微信中完成验证后复制新的文章链接", ErrHistoryVerificationRequired)
+	}
+	logAuthorHistory("author_show", "received")
 
 	cookies := resp.Cookies()
 	if len(cookies) > 0 {
+		logAuthorHistory("cookie", "received")
 		var cookieParts []string
 		for _, ck := range cookies {
 			cookieParts = append(cookieParts, fmt.Sprintf("%s=%s", ck.Name, ck.Value))
@@ -2227,7 +2469,69 @@ func (c *OfficialAccountClient) fetchCookie(acct *OfficialAccount) error {
 		save_accounts()
 		return nil
 	}
-	return errors.New("no cookie found")
+	logAuthorHistory("cookie", "missing")
+	return fmt.Errorf("%w：微信作者入口没有返回会话信息", ErrHistoryInvalidResponse)
+}
+
+// A username from cgiDataNew is only a candidate author ID. The author API
+// can include other accounts, so every returned item must identify this biz.
+func authorArticlesMatchBiz(articles []Article, biz string) bool {
+	if len(articles) == 0 {
+		return false
+	}
+	for _, article := range articles {
+		fieldBiz := strings.TrimSpace(article.Biz)
+		if strings.TrimSpace(article.Title) == "" || strings.TrimSpace(article.URL) == "" {
+			return false
+		}
+		articleURL, err := url.Parse(strings.TrimSpace(article.URL))
+		if err != nil || articleURL == nil {
+			return false
+		}
+		shortArticleURL := strings.HasPrefix(articleURL.Path, "/s/") &&
+			len(articleURL.Path) > len("/s/") && !strings.Contains(articleURL.Path[len("/s/"):], "/")
+		if !articleURL.IsAbs() || (articleURL.Scheme != "http" && articleURL.Scheme != "https") ||
+			articleURL.Hostname() != "mp.weixin.qq.com" || articleURL.User != nil || articleURL.Port() != "" ||
+			(articleURL.Path != "/s" && articleURL.Path != "/s/" && articleURL.Path != "/mp/appmsg/show" && !shortArticleURL) {
+			return false
+		}
+		urlBiz := strings.TrimSpace(articleURL.Query().Get("__biz"))
+		// Modern /s/<slug> links have no __biz parameter. In that case the
+		// author API's article field must identify the requested account.
+		if shortArticleURL && fieldBiz != biz {
+			return false
+		}
+		if fieldBiz == "" && urlBiz == "" {
+			return false
+		}
+		if (fieldBiz != "" && fieldBiz != biz) || (urlBiz != "" && urlBiz != biz) {
+			return false
+		}
+	}
+	return true
+}
+
+func rememberValidatedAuthorID(biz, authorID, key string) {
+	acct_mu.Lock()
+	changed := false
+	now := time.Now().Unix()
+	if acct := accounts[biz]; acct != nil && acct.Key == key &&
+		(acct.AuthorId == authorID || acct.AuthorId == "" && acct.CandidateAuthorId == authorID) &&
+		(!acct.AuthorIdVerified || acct.AuthorId != authorID || !acct.IsEffective || acct.HistoryValidatedAt < now) {
+		updated := *acct
+		updated.AuthorId = authorID
+		updated.AuthorIdVerified = true
+		// A stale legacy profile_ext response can mark the account ineffective
+		// immediately before a complete author-history traversal succeeds.
+		updated.IsEffective = true
+		updated.HistoryValidatedAt = now
+		accounts[biz] = &updated
+		changed = true
+	}
+	acct_mu.Unlock()
+	if changed {
+		save_accounts()
+	}
 }
 
 func (c *OfficialAccountClient) fetchArticleList(biz string, fromArticleID string) (*ArticleListResponse, error) {
@@ -2240,23 +2544,36 @@ func (c *OfficialAccountClient) fetchArticleList(biz string, fromArticleID strin
 	}
 	acct_mu.RUnlock()
 	if existing == nil {
+		logAuthorHistory("credentials", "missing_account")
 		return nil, newCodedError(result.CodeAccountNotFound, result.GetMsg(result.CodeAccountNotFound), nil)
 	}
+	if strings.TrimSpace(existing.Key) == "" {
+		logAuthorHistory("credentials", "missing_key")
+		return nil, ErrHistoryCredentialsMissing
+	}
+	authorID := firstNonempty(existing.AuthorId, existing.CandidateAuthorId)
+	if authorID == "" {
+		logAuthorHistory("credentials", "missing_author")
+		return nil, ErrAuthorHistoryUnavailable
+	}
+	// Older imports stored author IDs without proving which account they
+	// belong to. Check every returned article until a complete traversal has
+	// established that proof. Continue checking a matching candidate too.
+	needsAuthorValidation := !existing.AuthorIdVerified ||
+		existing.CandidateAuthorId != "" && authorID == existing.CandidateAuthorId
 	if existing.Cookie == "" || time.Now().Unix() >= existing.CookieExpiration {
-		fmt.Println("before fetch cookie")
-		if err := c.fetchCookie(existing); err != nil {
+		logAuthorHistory("cookie", "refresh")
+		if err := c.fetchCookie(existing, authorID); err != nil {
 			return nil, err
 		}
-	}
-
-	if existing.AuthorId == "" {
-		return nil, errors.New("当前文章未提供作者历史标识，请重新打开文章")
+	} else {
+		logAuthorHistory("cookie", "reuse")
 	}
 	buildURL := func() string {
 		u := url.URL{Scheme: "https", Host: "mp.weixin.qq.com", Path: "/mp/author"}
 		q := u.Query()
 		q.Set("action", "get_articles")
-		q.Set("author_id", existing.AuthorId)
+		q.Set("author_id", authorID)
 		q.Set("scene", "142")
 		q.Set("limit", "30")
 		q.Set("version", "undefined")
@@ -2270,28 +2587,16 @@ func (c *OfficialAccountClient) fetchArticleList(biz string, fromArticleID strin
 		u.RawQuery = q.Encode()
 		return u.String()
 	}
-	referer_params := url.Values{}
-	referer_params.Set("action", "show")
-	referer_params.Set("__biz", existing.Biz)
-	referer_params.Set("idx", "1")
-	referer_params.Set("author_id", existing.AuthorId)
-	referer_params.Set("scene", "142")
-	referer_params.Set("rscene", "128")
-	referer_params.Set("uin", existing.Uin)
-	referer_params.Set("key", existing.Key)
-	referer_params.Set("devicetype", "UnifiedPCMac")
-	referer_params.Set("version", "f2640619")
-	referer_params.Set("lang", "zh_CN")
-	referer_params.Set("ascene", "1")
-	referer_params.Set("acctmode", "0")
-	referer_params.Set("pass_ticket", existing.PassTicket)
-	referer_params.Set("countrycode", "CN")
-
-	referer := "https://mp.weixin.qq.com/mp/author?" + referer_params.Encode()
+	referer := authorShowURL(existing, authorID)
+	phase := "articles_next"
+	if fromArticleID == "" {
+		phase = "articles_first"
+	}
 	doRequest := func() (*ArticleListResponse, error) {
 		req, err := http.NewRequest("GET", buildURL(), nil)
 		if err != nil {
-			return nil, err
+			logAuthorHistory(phase, "read_error")
+			return nil, errors.New("无法构造微信作者列表请求")
 		}
 		req.Header.Set("Cookie", existing.Cookie)
 		req.Header.Set("accept", "*/*")
@@ -2307,21 +2612,30 @@ func (c *OfficialAccountClient) fetchArticleList(biz string, fromArticleID strin
 		req.Header.Set("user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36")
 		req.Header.Set("x-requested-with", "XMLHttpRequest")
 
-		resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+		resp, err := c.authorClient().Do(req)
 		if err != nil {
-			return nil, err
+			logAuthorHistory(phase, "network")
+			// net/http errors can contain the full credential-bearing referer.
+			return nil, newCodedError(result.CodeFetchMsgFailed, "微信作者列表网络请求失败", errors.Join(ErrHistoryNetworkFailure, err))
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
+			logAuthorHistory(phase, "http_status")
 			return nil, fmt.Errorf("微信作者列表返回 HTTP %d", resp.StatusCode)
 		}
-		bodyBytes, err := io.ReadAll(resp.Body)
+		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 		if err != nil {
-			return nil, err
+			logAuthorHistory(phase, "read_error")
+			return nil, newCodedError(result.CodeDataParseFailed, "读取微信作者列表失败", errors.Join(ErrHistoryInvalidResponse, err))
+		}
+		if wechatVerificationTitle.Match(bodyBytes) || bytes.Contains(bodyBytes, []byte("wappoc_appmsgcaptcha")) {
+			logAuthorHistory(phase, "verification")
+			return nil, ErrHistoryVerificationRequired
 		}
 		var data ArticleListResponse
 		if err := json.Unmarshal(bodyBytes, &data); err != nil {
-			return nil, err
+			logAuthorHistory(phase, "invalid_json")
+			return nil, newCodedError(result.CodeDataParseFailed, "微信未返回有效的作者列表", errors.Join(ErrHistoryInvalidResponse, err))
 		}
 		return &data, nil
 	}
@@ -2331,7 +2645,11 @@ func (c *OfficialAccountClient) fetchArticleList(biz string, fromArticleID strin
 		return nil, err
 	}
 	if data.Ret == -3 || data.BaseResp.Ret == -3 {
-		if err := c.fetchCookie(existing); err != nil {
+		logAuthorHistoryReturn(phase, "expired_retry", data.Ret, data.BaseResp.Ret)
+		if err := c.fetchCookie(existing, authorID); err != nil {
+			// A rejected first list response does not prove the session is
+			// expired when the follow-up author-page request itself fails.
+			// Preserve its network, verification, or HTTP error for the UI.
 			return nil, err
 		}
 		data, err = doRequest()
@@ -2339,11 +2657,34 @@ func (c *OfficialAccountClient) fetchArticleList(biz string, fromArticleID strin
 			return nil, err
 		}
 	}
+	if data.Ret == -3 || data.BaseResp.Ret == -3 {
+		logAuthorHistoryReturn(phase, "expired", data.Ret, data.BaseResp.Ret)
+		return nil, newCodedError(result.CodeAccountExpired, "公众号凭证已失效，请从电脑微信复制新的文章链接", ErrHistoryCredentialsExpired)
+	}
+	if fromArticleID == "" && existing.AuthorId == "" && existing.CandidateAuthorId != "" &&
+		(data.Ret == -1 || data.BaseResp.Ret == -1) {
+		logAuthorHistoryReturn(phase, "remote_error", data.Ret, data.BaseResp.Ret)
+		return nil, errCandidateAuthorFirstPageRejected
+	}
 	if data.Ret != 0 {
-		return nil, fmt.Errorf("微信作者列表返回错误 %d: %s", data.Ret, data.ErrMsg)
+		logAuthorHistoryReturn(phase, "remote_error", data.Ret, data.BaseResp.Ret)
+		return nil, fmt.Errorf("微信作者列表返回错误 %d", data.Ret)
 	}
 	if data.BaseResp.Ret != 0 {
+		logAuthorHistoryReturn(phase, "remote_error", data.Ret, data.BaseResp.Ret)
 		return nil, fmt.Errorf("微信作者列表返回错误 %d", data.BaseResp.Ret)
+	}
+	if needsAuthorValidation {
+		if len(data.Articles) == 0 && fromArticleID == "" || len(data.Articles) > 0 && !authorArticlesMatchBiz(data.Articles, biz) {
+			logAuthorHistory("candidate", "rejected")
+			return nil, errors.Join(ErrAuthorHistoryUnavailable, ErrCandidateAuthorHistoryRejected)
+		}
+		logAuthorHistory("candidate", "accepted")
+	}
+	if len(data.Articles) == 0 {
+		logAuthorHistory(phase, "empty")
+	} else {
+		logAuthorHistory(phase, "nonempty")
 	}
 	return data, nil
 }
@@ -2352,22 +2693,62 @@ func (c *OfficialAccountClient) fetchArticleList(biz string, fromArticleID strin
 // author page uses the last returned article mid as from_article_id; it does not
 // use the numeric offset from the legacy profile_ext endpoint.
 func (c *OfficialAccountClient) FetchArticleHistory(biz string) (*ArticleHistoryResponse, error) {
-	return collectArticleHistory(func(fromArticleID string) (*ArticleListResponse, error) {
+	acct_mu.RLock()
+	acct := accounts[biz]
+	authorID, key := "", ""
+	if acct != nil {
+		authorID, key = firstNonempty(acct.AuthorId, acct.CandidateAuthorId), acct.Key
+	}
+	acct_mu.RUnlock()
+	history, err := collectArticleHistory(func(fromArticleID string) (*ArticleListResponse, error) {
 		return c.fetchArticleList(biz, fromArticleID)
 	}, 2000)
+	if history == nil && errors.Is(err, errCandidateAuthorFirstPageRejected) {
+		var recoveryTransport http.RoundTripper
+		if c.authorHTTPClient != nil {
+			recoveryTransport = c.authorHTTPClient.Transport
+		}
+		recovered, recoveryErr := c.recoverExplicitAuthorIDAfterCandidateFailure(context.Background(), biz, recoveryTransport)
+		// A secondary page fetch can itself hit WeChat's verification page or
+		// redirect away from the original article. It does not override the
+		// already observed candidate-list failure.
+		if recoveryErr == nil && recovered {
+			acct_mu.RLock()
+			if current := accounts[biz]; current != nil {
+				authorID, key = current.AuthorId, current.Key
+			}
+			acct_mu.RUnlock()
+			history, err = collectArticleHistory(func(fromArticleID string) (*ArticleListResponse, error) {
+				return c.fetchArticleList(biz, fromArticleID)
+			}, 2000)
+		}
+	}
+	if err == nil && len(history.Articles) > 0 && authorID != "" {
+		// Persist validation only after the cursor reaches a normal terminal
+		// page. This proof protects a working author ID during later imports.
+		rememberValidatedAuthorID(biz, authorID, key)
+	}
+	return history, err
 }
 
 func collectArticleHistory(fetch func(string) (*ArticleListResponse, error), maxPages int) (*ArticleHistoryResponse, error) {
 	result := &ArticleHistoryResponse{Articles: []Article{}}
+	partialResult := func(err error) (*ArticleHistoryResponse, error) {
+		if len(result.Articles) == 0 {
+			return nil, err
+		}
+		return result, err
+	}
 	seen := map[string]bool{}
 	fromArticleID := ""
 	for page := 0; page < maxPages; page++ {
 		data, err := fetch(fromArticleID)
 		if err != nil {
-			return nil, err
+			return partialResult(err)
 		}
 		result.Pages++
 		if len(data.Articles) == 0 {
+			logAuthorHistory("pagination", "end")
 			return result, nil
 		}
 		for _, article := range data.Articles {
@@ -2383,11 +2764,14 @@ func collectArticleHistory(fetch func(string) (*ArticleListResponse, error), max
 		}
 		next := strings.TrimSpace(data.Articles[len(data.Articles)-1].Mid)
 		if next == "" || next == fromArticleID {
-			return nil, errors.New("微信作者列表分页游标未继续前进")
+			logAuthorHistory("pagination", "stalled")
+			return partialResult(fmt.Errorf("%w：微信作者列表分页游标未继续前进", ErrHistoryInvalidResponse))
 		}
+		logAuthorHistory("pagination", "advanced")
 		fromArticleID = next
 	}
-	return nil, errors.New("微信作者列表页数超过安全上限")
+	logAuthorHistory("pagination", "page_limit")
+	return partialResult(fmt.Errorf("%w：微信作者列表页数超过安全上限", ErrHistoryInvalidResponse))
 }
 
 func (c *OfficialAccountClient) fetchMsgList(logger zerolog.Logger, biz string, offset int) (*OfficialMsgListResp, error) {
@@ -2405,6 +2789,9 @@ func (c *OfficialAccountClient) fetchMsgList(logger zerolog.Logger, biz string, 
 	if existing == nil {
 		return nil, newCodedError(result.CodeAccountNotFound, result.GetMsg(result.CodeAccountNotFound), nil)
 	}
+	if strings.TrimSpace(existing.Uin) == "" || strings.TrimSpace(existing.Key) == "" {
+		return nil, newCodedError(result.CodeFetchMsgFailed, "当前链接没有历史访问凭证", ErrHistoryCredentialsMissing)
+	}
 	target_url := c.BuildMsgListURL(existing, offset)
 	params := url.Values{}
 	params.Add("action", "home")
@@ -2421,7 +2808,7 @@ func (c *OfficialAccountClient) fetchMsgList(logger zerolog.Logger, biz string, 
 	referer := "https://mp.weixin.qq.com/mp/profile_ext?" + params.Encode()
 	resp, err := c.Fetch(target_url, referer)
 	if err != nil {
-		fmt.Printf("c.Fetch msg list: error: %s\n", err.Error())
+		logger.Warn().Str("reason", safeNetReason(err)).Msg("fetch msg list: network error")
 		code := result.CodeFetchMsgFailed
 		msg := result.GetMsg(code)
 		reason := safeNetReason(err)
@@ -2431,12 +2818,12 @@ func (c *OfficialAccountClient) fetchMsgList(logger zerolog.Logger, biz string, 
 		} else if reason != "" {
 			msg = fmt.Sprintf("%s: %s", msg, reason)
 		}
-		return nil, newCodedError(code, msg, err)
+		return nil, newCodedError(code, msg, errors.Join(ErrHistoryNetworkFailure, err))
 	}
 	defer resp.Body.Close()
 	resp_bytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, newCodedError(result.CodeFetchMsgFailed, "读取响应失败", err)
+		return nil, newCodedError(result.CodeDataParseFailed, "读取响应失败", errors.Join(ErrHistoryInvalidResponse, err))
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, newCodedError(result.CodeFetchMsgFailed, fmt.Sprintf("微信接口返回 HTTP %d", resp.StatusCode), nil)
@@ -2444,15 +2831,15 @@ func (c *OfficialAccountClient) fetchMsgList(logger zerolog.Logger, biz string, 
 	var data OfficialMsgListResp
 	err = json.Unmarshal(resp_bytes, &data)
 	if err != nil {
-		fmt.Printf("json.Unmarshal msg list: error: %s\n", err.Error())
-		return nil, newCodedError(result.CodeDataParseFailed, result.GetMsg(result.CodeDataParseFailed), err)
+		logger.Warn().Msg("fetch msg list: invalid JSON response")
+		return nil, newCodedError(result.CodeDataParseFailed, result.GetMsg(result.CodeDataParseFailed), errors.Join(ErrHistoryInvalidResponse, err))
 	}
 	if data.Ret != 0 {
-		fmt.Printf("data.Ret != 0 msg list: error: %s\n", string(resp_bytes))
+		logger.Warn().Int("wechat_ret", data.Ret).Msg("fetch msg list: WeChat rejected request")
 		if data.Ret == -3 {
 			existing.IsEffective = false
 			save_accounts()
-			return nil, newCodedError(result.CodeAccountExpired, result.GetMsg(result.CodeAccountExpired), nil)
+			return nil, newCodedError(result.CodeAccountExpired, result.GetMsg(result.CodeAccountExpired), ErrHistoryCredentialsExpired)
 		}
 		if data.Ret == -6 {
 			existing.IsEffective = false

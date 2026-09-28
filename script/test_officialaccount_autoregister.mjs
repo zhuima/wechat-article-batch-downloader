@@ -3,6 +3,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 const requests = [];
+const intervalCallbacks = [];
 const noop = () => {};
 const body = { appendChild: noop };
 const document = {
@@ -13,7 +14,8 @@ const document = {
   createElement() {
     return { style: {}, appendChild: noop };
   },
-  querySelector() {
+  querySelector(selector) {
+    if (selector === "#__mp_article_batch_panel__") return {};
     return null;
   },
   querySelectorAll() {
@@ -36,8 +38,12 @@ const context = {
     search: "?__biz=MzTest&mid=1&idx=1&sn=abc",
   },
   setTimeout: noop,
-  setInterval: noop,
+  setInterval(callback) {
+    intervalCallbacks.push(callback);
+  },
   clearInterval: noop,
+  addEventListener: noop,
+  removeEventListener: noop,
   insert_channels_style: noop,
   RSSIcon: "",
   DownloadIcon8: "",
@@ -61,6 +67,7 @@ const context = {
   cgiDataNew: {
     nick_name: "测试公众号",
     title: "测试文章",
+    user_name: "gh_account_candidate",
   },
   nickname: "测试公众号",
   uin: "123",
@@ -81,4 +88,21 @@ const refreshes = requests.filter((request) => request.url.includes("/api/mp/ref
 assert.equal(refreshes.length, 1, "opening an article should register the account once");
 assert.equal(refreshes[0].body.biz, "MzTest");
 assert.equal(refreshes[0].body.nickname, "测试公众号");
+assert.equal(refreshes[0].body.author_id, "");
+assert.equal(refreshes[0].body.candidate_author_id, "gh_account_candidate");
+
+context.cgiDataNew.authorId = "explicit-author-id";
+for (const callback of intervalCallbacks) callback();
+await new Promise((resolve) => setImmediate(resolve));
+const upgraded = requests.filter((request) => request.url.includes("/api/mp/refresh"));
+assert.equal(upgraded.length, 2, "a later explicit author ID should refresh the same session");
+assert.equal(upgraded[1].body.author_id, "explicit-author-id");
+assert.equal(upgraded[1].body.candidate_author_id, "gh_account_candidate");
+for (const callback of intervalCallbacks) callback();
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(
+  requests.filter((request) => request.url.includes("/api/mp/refresh")).length,
+  2,
+  "unchanged author identity should remain deduplicated",
+);
 console.log("officialaccount auto-registration: ok");
